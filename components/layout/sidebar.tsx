@@ -34,7 +34,15 @@ const navItems = [
   },
 ]
 
-export function Sidebar() {
+interface SidebarProps {
+  user?: {
+    fullName: string | null;
+    imageUrl: string;
+    especialidade?: string;
+  }
+}
+
+export function Sidebar({ user }: SidebarProps) {
   const pathname = usePathname()
 
   return (
@@ -81,12 +89,18 @@ export function Sidebar() {
       <div className="border-t p-4">
         <div className="flex items-center gap-3 px-2 py-1">
           <Avatar className="h-9 w-9">
-            <AvatarImage src="" />
-            <AvatarFallback className="bg-blue-100 text-primary text-xs font-bold">DR</AvatarFallback>
+            <AvatarImage src={user?.imageUrl} />
+            <AvatarFallback className="bg-blue-100 text-primary text-xs font-bold">
+              {user?.fullName?.split(' ').map(n => n[0]).join('').slice(0, 2) || 'DR'}
+            </AvatarFallback>
           </Avatar>
           <div className="flex flex-col">
-            <span className="text-sm font-semibold text-slate-900">Dr. Ricardo</span>
-            <span className="text-xs text-slate-500">Ortopedista</span>
+            <span className="text-sm font-semibold text-slate-900 truncate max-w-[140px]">
+              {user?.fullName || 'Médico'}
+            </span>
+            <span className="text-xs text-slate-500 truncate max-w-[140px]">
+              {user?.especialidade || 'Clínico Geral'}
+            </span>
           </div>
         </div>
       </div>

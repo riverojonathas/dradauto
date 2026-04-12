@@ -13,11 +13,17 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { MobileNav } from "./mobile-nav"
 
+import { SignOutButton } from "@clerk/nextjs"
+
 interface HeaderProps {
   title: string
+  user?: {
+    fullName: string | null
+    imageUrl: string
+  }
 }
 
-export function Header({ title }: HeaderProps) {
+export function Header({ title, user }: HeaderProps) {
   return (
     <header className="fixed right-0 top-0 z-30 flex h-[--header-height] w-full items-center justify-between border-b bg-white px-6 md:w-[calc(100%-var(--sidebar-width))]">
       <div className="flex items-center gap-4">
@@ -45,9 +51,9 @@ export function Header({ title }: HeaderProps) {
             render={
               <Button variant="ghost" className="relative h-8 w-8 rounded-full">
                 <Avatar className="h-8 w-8">
-                  <AvatarImage src="" />
+                  <AvatarImage src={user?.imageUrl} />
                   <AvatarFallback className="bg-blue-100 text-primary text-xs font-bold">
-                    DR
+                    {user?.fullName?.split(' ').map(n => n[0]).join('').slice(0, 2) || 'DR'}
                   </AvatarFallback>
                 </Avatar>
               </Button>
@@ -59,7 +65,9 @@ export function Header({ title }: HeaderProps) {
             <DropdownMenuItem>Ver perfil</DropdownMenuItem>
             <DropdownMenuItem>Configurações</DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-red-600">Sair</DropdownMenuItem>
+            <SignOutButton>
+              <DropdownMenuItem className="text-red-600 cursor-pointer">Sair</DropdownMenuItem>
+            </SignOutButton>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
