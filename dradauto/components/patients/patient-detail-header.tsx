@@ -9,9 +9,11 @@ import { GoogleSyncBadge } from './google-sync-badge'
 import { PatientFormDialog } from './patient-form-dialog'
 import { NewAppointmentDialog } from '@/components/agenda/new-appointment-dialog'
 import { useRouter } from 'next/navigation'
+import { toE164BR } from '@/lib/phone'
+import type { Patient } from '@/types'
 
 interface PatientDetailHeaderProps {
-  patient: any
+  patient: Patient
   isProviderConnected: boolean
 }
 
@@ -19,6 +21,8 @@ export function PatientDetailHeader({ patient, isProviderConnected }: PatientDet
   const router = useRouter()
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [isAppointmentDialogOpen, setIsAppointmentDialogOpen] = useState(false)
+  const [suggestedDate, setSuggestedDate] = useState<Date | undefined>(undefined)
+  const [suggestedTime, setSuggestedTime] = useState<string | undefined>(undefined)
 
   const getInitials = (name: string) => {
     return name?.split(' ').map((n: string) => n[0]).join('').slice(0, 2) || 'PA'
@@ -37,9 +41,31 @@ export function PatientDetailHeader({ patient, isProviderConnected }: PatientDet
   }
 
   const handleWhatsApp = () => {
-    const numbersOnly = patient.whatsapp.replace(/\D/g, '')
-    const url = `https://wa.me/55${numbersOnly}`
+    const e164 = toE164BR(patient.whatsapp)
+    if (!e164) return
+    const url = `https://wa.me/${e164}`
     window.open(url, '_blank')
+  }
+
+  const handleOpenAppointment = () => {
+    const slot = new Date()
+    slot.setSeconds(0, 0)
+    const minutes = slot.getMinutes()
+
+    if (minutes === 0) {
+      slot.setMinutes(0)
+    } else if (minutes <= 30) {
+      slot.setMinutes(30)
+    } else {
+      slot.setHours(slot.getHours() + 1, 0, 0, 0)
+    }
+
+    const hh = slot.getHours().toString().padStart(2, '0')
+    const mm = slot.getMinutes().toString().padStart(2, '0')
+
+    setSuggestedDate(slot)
+    setSuggestedTime(`${hh}:${mm}`)
+    setIsAppointmentDialogOpen(true)
   }
 
   const idade = calcularIdade(patient.data_nascimento)
@@ -90,7 +116,7 @@ export function PatientDetailHeader({ patient, isProviderConnected }: PatientDet
                 <MessageCircle className="size-4 mr-2" />
                 WhatsApp
               </Button>
-              <Button onClick={() => setIsAppointmentDialogOpen(true)} className="w-full sm:w-auto rounded-full shadow-md">
+              <Button onClick={handleOpenAppointment} className="w-full sm:w-auto rounded-full shadow-md">
                 <CalendarPlus className="size-4 mr-2" />
                 Nova Consulta
               </Button>
@@ -107,11 +133,14 @@ export function PatientDetailHeader({ patient, isProviderConnected }: PatientDet
         onClose={() => setIsEditDialogOpen(false)}
         initialData={patient}
         isProviderConnected={isProviderConnected}
+        onDeleted={() => router.push('/pacientes')}
       />
 
       <NewAppointmentDialog
         isOpen={isAppointmentDialogOpen}
         onClose={() => setIsAppointmentDialogOpen(false)}
+        initialDate={suggestedDate}
+        initialTime={suggestedTime}
         initialPatient={{ id: patient.id, nome: patient.nome, whatsapp: patient.whatsapp }}
         onSuccess={() => {
           setIsAppointmentDialogOpen(false)

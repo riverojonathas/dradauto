@@ -2,7 +2,7 @@
 
 > **Skills de planejamento utilizadas:** `writing-plans` + `saas-mvp-launcher`
 > **Data:** 2026-04-11
-> **Status:** Planejamento evoluído — pronto para iniciar Fase 0
+> **Status:** Planejamento evoluído — Fases 0–4 concluídas + migração Clerk → Supabase Auth em andamento
 
 ---
 
@@ -45,7 +45,7 @@
 |---------|-------|----------------|------------------------|
 | **Vercel** | Hobby (free) | 100GB bandwidth, serverless + Python functions | +$20/mês se precisar de equipe ou mais recursos |
 | **Supabase** | Free | 500MB DB, 50K MAU, 1GB storage, RLS, Vault | +$25/mês ao escalar |
-| **Clerk** | Free | 10.000 MAU | +$25/mês após 10K usuários |
+| **Supabase Auth (nativo)** | Incluso no Free | Integrado ao limite do projeto Supabase | Sem custo adicional específico de auth no MVP |
 | **n8n** | Self-hosted Fly.io (free) | 3 VMs shared, ilimitados workflows | +$0 até crescer muito |
 | **OpenAI / Anthropic** | Pay-per-use | — | ~R$0,01–0,05 por conversa WhatsApp |
 | **Stripe** | — | Sem taxa fixa | 2,9% + R$0,30 por transação |
@@ -157,7 +157,7 @@ Sistema envia via WhatsApp:
 | `saas-mvp-launcher` | Roadmap, stack, arquitetura multi-tenant |
 | `react-nextjs-development` | Frontend: Next.js 14+ App Router, PWA, Server Components |
 | `shadcn` | Componentes UI: forms, calendário, prontuário |
-| `clerk-auth` | Auth com roles: médico, secretária (paciente não tem conta) |
+| `postgresql` + `@supabase/ssr` | Auth nativo com Supabase + RLS por `auth.uid()` |
 | `postgresql` | Schema: pacientes, prontuário, anamnese, consultas, RLS |
 
 ### Camada 2 — Integrações Principais
@@ -233,10 +233,12 @@ Sistema envia via WhatsApp:
 
 ---
 
-### Plano 2 — Autenticação com Clerk
+### Plano 2 — Autenticação (Histórico)
 **Status:** ✅ Concluído — 2026-04-11  
 **Skill principal:** `clerk-auth`  
 **Commit:** `feat: clerk auth + roles + onboarding`
+
+> **Atualização 2026-04-14:** Implementada migração para Supabase Auth no código (`proxy.ts`, layout, ações server, login/signup, logout). Plano histórico mantido para rastreabilidade.
 
 > **Nota:** ClerkProvider configurado com suporte a `pt-BR`. Middleware com redirecionamento inteligente: não autenticado → `/sign-in`; autenticado sem onboarding → `/onboarding`; onboarding completo tentando acessar `/onboarding` → `/`.
 
@@ -306,7 +308,7 @@ Sistema envia via WhatsApp:
 | Sub-fase | Plano | Status |
 |----------|-------|--------|
 | 0a — Next.js + Shadcn + design system | Plano 1 | ✅ |
-| 0b — Clerk auth + onboarding | Plano 2 | ✅ |
+| 0b — Auth + onboarding (histórico Clerk) | Plano 2 | ✅ |
 | 0c — Supabase schema + RLS + tipos | Plano 3 | ✅ |
 | 0d — PWA manifest + service worker | Plano 4 | ✅ |
 | 0e — n8n Fly.io | — | ⬜ (iniciar antes da Fase 5) |
@@ -317,12 +319,12 @@ Sistema envia via WhatsApp:
 
 > Objetivo: médico cria conta → configura clínica → acessa painel vazio.
 
-- [ ] Implementar login/signup com Clerk
+- [x] Implementar login/signup com Supabase Auth
 - [ ] Criar tabela `clinics` com: nome, logo, CRM, especialidade, valor_consulta, whatsapp_number
 - [ ] Criar fluxo de onboarding: 3 steps (dados pessoais → dados da clínica → configurações)
-- [ ] Sincronizar usuário Clerk → tabela `users` via webhook Clerk
+- [x] Vincular usuário autenticado ao registro da clínica no Supabase (`clerk_user_id` temporário + `user_id` em migração)
 - [ ] Criar layout do painel: sidebar, header, área de conteúdo
-- [ ] Testar: médico cria conta → preenche onboarding → acessa painel
+- [x] Testar: médico cria conta → preenche onboarding → acessa painel
 - [ ] Commit: `feat: multi-tenant onboarding`
 
 ---
@@ -516,6 +518,7 @@ done
 | Data | Decisão | Escolha | Alternativa descartada | Motivo |
 |------|---------|---------|----------------------|--------|
 | 2026-04-11 | Auth | Clerk | Supabase Auth | Clerk tem melhor suporte a roles e multi-tenant |
+| 2026-04-14 | Auth (migração) | Supabase Auth | Clerk | Melhor alinhamento com RLS e menor complexidade operacional/custo |
 | 2026-04-11 | Banco | PostgreSQL (Supabase) | MongoDB | Dados médicos são relacionais |
 | 2026-04-11 | Agendamento | Google Calendar API | Cal.com | Médicos já usam Google Agenda |
 | 2026-04-11 | IA Secretary | PydanticAI | LangChain | Type-safe, mais simples para agents com tools definidas |

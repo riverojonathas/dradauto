@@ -3,13 +3,62 @@ import { createServerClient } from '@/lib/supabase/server'
 import { getCurrentClinic } from '@/lib/clinic'
 import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from '@/lib/google/calendar'
 import type { AppointmentInsert } from '@/types'
+import { toE164BR } from '@/lib/phone'
+
+type CreateAppointmentInput = Omit<AppointmentInsert, 'clinic_id' | 'patient_whatsapp'> & {
+  patient_whatsapp: string
+  allowConflict?: boolean
+}
 
 // 1. Criar consulta
-export async function createAppointment(data: AppointmentInsert) {
+export async function createAppointment(data: CreateAppointmentInput) {
   const clinic = await getCurrentClinic()
   if (!clinic) throw new Error('Clínica não encontrada')
 
   const supabase = createServerClient() as any
+
+  const patientName = (data.patient_name || '').trim()
+  if (!patientName) throw new Error('Nome do paciente é obrigatório')
+
+  const normalizedWhatsapp = toE164BR(data.patient_whatsapp)
+  if (!normalizedWhatsapp) throw new Error('WhatsApp inválido. Use DDD e número válidos.')
+
+  const scheduledDate = data.scheduled_at ? new Date(data.scheduled_at) : null
+  if (!scheduledDate || Number.isNaN(scheduledDate.getTime())) {
+    throw new Error('Data e horário inválidos')
+  }
+
+  const allowedTipos = new Set(['consulta', 'retorno', 'teleconsulta'])
+  if (!allowedTipos.has(data.tipo || '')) {
+    throw new Error('Tipo de consulta inválido')
+  }
+
+  const allowedDurations = new Set([30, 45, 60])
+  const duration = Number(data.duration_minutes)
+  if (!allowedDurations.has(duration)) {
+    throw new Error('Duração inválida')
+  }
+
+  const value = Number(data.valor ?? 0)
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error('Valor inválido')
+  }
+
+  const conflictWindowStart = new Date(scheduledDate.getTime() - 30 * 60_000).toISOString()
+  const conflictWindowEnd = new Date(scheduledDate.getTime() + 30 * 60_000).toISOString()
+
+  const conflictCheck = await supabase
+    .from('appointments')
+    .select('id')
+    .eq('clinic_id', clinic.id)
+    .neq('status', 'cancelled')
+    .gte('scheduled_at', conflictWindowStart)
+    .lte('scheduled_at', conflictWindowEnd)
+
+  const hasConflict = (conflictCheck.data?.length ?? 0) > 0
+  if (hasConflict && !data.allowConflict) {
+    return { requiresConflictConfirmation: true, hasConflict: true }
+  }
 
   let finalPatientId = data.patient_id
 
@@ -18,7 +67,7 @@ export async function createAppointment(data: AppointmentInsert) {
       .from('patients')
       .select('id')
       .eq('clinic_id', clinic.id)
-      .eq('whatsapp', data.patient_whatsapp)
+      .eq('whatsapp', normalizedWhatsapp)
       .single()
 
     if (existingPatient) {
@@ -28,8 +77,8 @@ export async function createAppointment(data: AppointmentInsert) {
         .from('patients')
         .insert({
           clinic_id: clinic.id,
-          nome: data.patient_name,
-          whatsapp: data.patient_whatsapp,
+          nome: patientName,
+          whatsapp: normalizedWhatsapp,
         })
         .select('id')
         .single()
@@ -42,20 +91,17 @@ export async function createAppointment(data: AppointmentInsert) {
     }
   }
 
-  // Verificar conflito (warning, não bloqueio hard)
-  const conflictCheck = await supabase
-    .from('appointments')
-    .select('id, scheduled_at, patient_name')
-    .eq('clinic_id', clinic.id)
-    .neq('status', 'cancelled')
-    .gte('scheduled_at', new Date(new Date(data.scheduled_at!).getTime() - 30 * 60_000).toISOString())
-    .lte('scheduled_at', new Date(new Date(data.scheduled_at!).getTime() + 30 * 60_000).toISOString())
-
-  // Inserir no banco primeiro
+  // Inserir no banco apenas após validação e confirmação de conflito
   const { data: appointment, error } = await supabase
     .from('appointments')
     .insert({ 
-      ...data, 
+      patient_name: patientName,
+      patient_whatsapp: normalizedWhatsapp,
+      scheduled_at: scheduledDate.toISOString(),
+      duration_minutes: duration,
+      tipo: data.tipo,
+      valor: value,
+      observacoes: data.observacoes ?? null,
       clinic_id: clinic.id, 
       patient_id: finalPatientId,
       status: 'pending' 
@@ -69,19 +115,19 @@ export async function createAppointment(data: AppointmentInsert) {
   }
 
   // Tentar criar no Google Calendar (não falha a operação se o Google estiver offline)
-  if (clinic.google_connected) {
+  if (clinic.google_access_token) {
     try {
       const { google_event_id, google_meet_link } = await createCalendarEvent(clinic, appointment)
       await supabase.from('appointments').update({ google_event_id, google_meet_link })
         .eq('id', appointment.id)
-      return { ...appointment, google_event_id, google_meet_link, hasConflict: (conflictCheck.data?.length ?? 0) > 0 }
+      return { ...appointment, google_event_id, google_meet_link, hasConflict }
     } catch (e) {
       // Google falhou — retornar consulta sem event_id, frontend exibe aviso
-      return { ...appointment, google_error: true, hasConflict: (conflictCheck.data?.length ?? 0) > 0 }
+      return { ...appointment, google_error: true, hasConflict }
     }
   }
 
-  return { ...appointment, hasConflict: (conflictCheck.data?.length ?? 0) > 0 }
+  return { ...appointment, hasConflict }
 }
 
 // 2. Reagendar consulta
@@ -114,7 +160,7 @@ export async function rescheduleAppointment(
 
   if (updateError) throw new Error(updateError.message)
 
-  if (clinic.google_connected && current.google_event_id) {
+  if (clinic.google_access_token && current.google_event_id) {
     try {
       await updateCalendarEvent(clinic, current.google_event_id, newScheduledAt, durationMinutes ?? current.duration_minutes)
     } catch { /* silencioso */ }
@@ -144,7 +190,7 @@ export async function cancelAppointment(id: string) {
 
   if (updateError) throw new Error(updateError.message)
 
-  if (clinic.google_connected && current.google_event_id) {
+  if (clinic.google_access_token && current.google_event_id) {
     try { await deleteCalendarEvent(clinic, current.google_event_id) } catch { /* silencioso */ }
   }
 }

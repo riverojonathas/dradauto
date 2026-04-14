@@ -19,20 +19,9 @@ import { searchPatients } from '@/app/actions/patients'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { useDebounce } from 'use-debounce'
 import { useEffect } from 'react'
+import { formatPhoneBR, toE164BR } from '@/lib/phone'
 
 import type { Patient } from '@/types'
-
-function normalizeWhatsapp(value: string): string {
-  return value.replace(/\D/g, '')
-}
-
-function formatWhatsapp(value: string): string {
-  const digits = normalizeWhatsapp(value).slice(0, 11)
-  if (digits.length <= 2) return digits
-  if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`
-  if (digits.length <= 10) return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`
-  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`
-}
 
 // Componente de busca de paciente com criação inline
 function PatientSearch({ 
@@ -162,22 +151,22 @@ export function NewAppointmentDialog({ isOpen, onClose, initialDate, initialTime
 
   const [patientId, setPatientId] = useState<string>(initialPatient?.id || '')
   const [patientName, setPatientName] = useState<string>(initialPatient?.nome || '')
-  const [whatsapp, setWhatsapp] = useState(initialPatient?.whatsapp || '')
+  const [whatsapp, setWhatsapp] = useState(formatPhoneBR(initialPatient?.whatsapp || ''))
   const [tipo, setTipo] = useState('consulta')
   const [duracao, setDuracao] = useState(String(defaultDuration || 30))
   const [valor, setValor] = useState(String(defaultValor || 150))
   const [observacoes, setObservacoes] = useState('')
   const [time, setTime] = useState(initialTime || '09:00')
 
-  const whatsappDigits = normalizeWhatsapp(whatsapp)
-  const isWhatsappValid = whatsappDigits.length === 10 || whatsappDigits.length === 11
+  const whatsappE164 = toE164BR(whatsapp)
+  const isWhatsappValid = !!whatsappE164
 
   // Resetar formulário ao abrir o dialog (novo slot/data)
   useEffect(() => {
     if (isOpen) {
       setPatientId(initialPatient?.id || '')
       setPatientName(initialPatient?.nome || '')
-      setWhatsapp(initialPatient?.whatsapp || '')
+      setWhatsapp(formatPhoneBR(initialPatient?.whatsapp || ''))
       setTipo('consulta')
       setDuracao(String(defaultDuration || 30))
       setValor(String(defaultValor || 150))
@@ -190,9 +179,13 @@ export function NewAppointmentDialog({ isOpen, onClose, initialDate, initialTime
 
   const handleSubmit = async () => {
     setSubmitError(null)
+    if (!whatsappE164) {
+      setSubmitError('WhatsApp inválido. Informe DDD e número válidos.')
+      return
+    }
+
     try {
       setIsLoading(true)
-      setConflict(false)
 
       const scheduledAt = new Date(initialDate || new Date())
       const [h, m] = time.split(':').map(Number)
@@ -201,16 +194,16 @@ export function NewAppointmentDialog({ isOpen, onClose, initialDate, initialTime
       const res = await createAppointment({
         patient_id: patientId || null,
         patient_name: patientName,
-        patient_whatsapp: whatsapp,
+        patient_whatsapp: whatsappE164,
         scheduled_at: scheduledAt.toISOString(),
         duration_minutes: parseInt(duracao),
         tipo,
         valor: parseFloat(valor) || 0,
         observacoes,
-        clinic_id: '',
+        allowConflict: conflict,
       })
 
-      if (res.hasConflict && !conflict) {
+      if (res.requiresConflictConfirmation) {
         setConflict(true)
         setIsLoading(false)
         return
@@ -244,7 +237,7 @@ export function NewAppointmentDialog({ isOpen, onClose, initialDate, initialTime
               onSelect={(p) => {
                 setPatientId(p.id || '')
                 setPatientName(p.nome)
-                if (p.whatsapp) setWhatsapp(p.whatsapp)
+                setWhatsapp(formatPhoneBR(p.whatsapp || ''))
               }}
             />
           </div>
@@ -256,12 +249,15 @@ export function NewAppointmentDialog({ isOpen, onClose, initialDate, initialTime
               <InputGroupInput 
                 placeholder="(11) 99999-9999" 
                 value={whatsapp} 
-                onChange={(e) => setWhatsapp(formatWhatsapp(e.target.value))}
-                disabled={!!patientId} // Desabilita se for paciente existente
+                onChange={(e) => setWhatsapp(formatPhoneBR(e.target.value))}
+                disabled={!!patientId && isWhatsappValid}
               />
             </InputGroup>
-            {!patientId && whatsapp && !isWhatsappValid && (
+            {whatsapp && !isWhatsappValid && (
               <p className="text-xs text-destructive">Digite um WhatsApp valido com DDD (10 ou 11 digitos).</p>
+            )}
+            {!!patientId && !isWhatsappValid && (
+              <p className="text-xs text-amber-700">Paciente sem WhatsApp valido. Complete o numero para continuar.</p>
             )}
           </div>
 

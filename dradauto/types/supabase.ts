@@ -12,7 +12,7 @@ export type Database = {
       clinics: {
         Row: {
           id: string
-          clerk_user_id: string
+          user_id: string | null
           nome: string
           crm: string
           crm_estado: string
@@ -34,7 +34,7 @@ export type Database = {
         }
         Insert: {
           id?: string
-          clerk_user_id: string
+          user_id?: string | null
           nome: string
           crm: string
           crm_estado: string
@@ -56,7 +56,7 @@ export type Database = {
         }
         Update: {
           id?: string
-          clerk_user_id?: string
+          user_id?: string | null
           nome?: string
           crm?: string
           crm_estado?: string
@@ -375,7 +375,6 @@ export type Database = {
         Row: {
           id: string
           clinic_id: string | null
-          clerk_user_id: string | null
           action: string
           resource_type: string
           resource_id: string | null
@@ -386,7 +385,6 @@ export type Database = {
         Insert: {
           id?: string
           clinic_id?: string | null
-          clerk_user_id?: string | null
           action: string
           resource_type: string
           resource_id?: string | null
@@ -397,7 +395,6 @@ export type Database = {
         Update: {
           id?: string
           clinic_id?: string | null
-          clerk_user_id?: string | null
           action?: string
           resource_type?: string
           resource_id?: string | null

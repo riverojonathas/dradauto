@@ -2,10 +2,24 @@ import { Clinic } from '@/types'
 import { createServerClient } from '@/lib/supabase/server'
 
 export async function getValidAccessToken(clinic: Clinic): Promise<string> {
+  // Validar que temos os campos necessários
+  if (!clinic.google_access_token) {
+    throw new Error('GOOGLE_NOT_CONNECTED')
+  }
+
   const expiresAt = new Date(clinic.google_token_expires_at!)
   const needsRefresh = expiresAt <= new Date(Date.now() + 5 * 60 * 1000)
 
-  if (!needsRefresh) return clinic.google_access_token!
+  if (!needsRefresh) return clinic.google_access_token
+
+  // Se precisa refresh mas não tem refresh_token, o token foi revogado
+  if (!clinic.google_refresh_token) {
+    const supabase = createServerClient() as any
+    await supabase.from('clinics')
+      .update({ google_connected: false, google_access_token: null })
+      .eq('id', clinic.id)
+    throw new Error('GOOGLE_TOKEN_MISSING')
+  }
 
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',

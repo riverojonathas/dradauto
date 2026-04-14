@@ -2,13 +2,15 @@
 
 import { useState } from 'react'
 import { updateClinicSettings } from '@/app/actions/settings'
+import { getGoogleAuthUrl, disconnectGoogle } from '@/app/actions/google'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { AlertCircle, CheckCircle2, Clock, Calendar, DollarSign, Loader2 } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Clock, Calendar, DollarSign, Loader2, Link2, CalendarDays, Users, ShieldAlert } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 import type { Clinic } from '@/types'
 
 const DAYS = [
@@ -31,6 +33,8 @@ interface Props {
 }
 
 export function ClinicSettingsForm({ clinic }: Props) {
+  const router = useRouter()
+
   const [workStart, setWorkStart] = useState(clinic.working_hours_start || '08:00')
   const [workEnd, setWorkEnd]     = useState(clinic.working_hours_end   || '18:00')
   const [workDays, setWorkDays]   = useState<number[]>(
@@ -42,6 +46,11 @@ export function ClinicSettingsForm({ clinic }: Props) {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError]   = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
+  const [isConnectingAgenda, setIsConnectingAgenda] = useState(false)
+  const [isConnectingContacts, setIsConnectingContacts] = useState(false)
+  const [isRevokingGoogle, setIsRevokingGoogle] = useState(false)
+
+  const hasGoogleSocial = false
 
   const toggleDay = (day: number) => {
     setWorkDays(prev =>
@@ -67,6 +76,37 @@ export function ClinicSettingsForm({ clinic }: Props) {
     } finally {
       setIsLoading(false)
     }
+  }
+
+  const connectGoogleIntegration = async (integration: 'calendar' | 'contacts') => {
+    if (integration === 'calendar') setIsConnectingAgenda(true)
+    if (integration === 'contacts') setIsConnectingContacts(true)
+
+    try {
+      const url = await getGoogleAuthUrl({ integration, returnTo: '/configuracoes' })
+      window.location.href = url
+    } catch (e: any) {
+      setError(e?.message || 'Erro ao iniciar autorização do Google.')
+      setIsConnectingAgenda(false)
+      setIsConnectingContacts(false)
+    }
+  }
+
+  const handleDisconnectGoogle = async () => {
+    setIsRevokingGoogle(true)
+    setError(null)
+    try {
+      await disconnectGoogle()
+      router.refresh()
+    } catch (e: any) {
+      setError(e?.message || 'Erro ao revogar integração Google.')
+    } finally {
+      setIsRevokingGoogle(false)
+    }
+  }
+
+  const handleManageGoogleSocial = () => {
+    setError('Google Social passou a ser gerenciado pelo Supabase Auth nesta migração.')
   }
 
   return (
@@ -189,6 +229,105 @@ export function ClinicSettingsForm({ clinic }: Props) {
               />
             </InputGroup>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Integrações */}
+      <Card className="rounded-3xl border-slate-200/60 shadow-sm">
+        <CardHeader className="px-8 pt-8 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="size-10 rounded-2xl bg-primary/10 flex items-center justify-center">
+              <Link2 className="size-5 text-primary" />
+            </div>
+            <div>
+              <CardTitle className="text-lg">Integrações</CardTitle>
+              <CardDescription>Autorize ou revogue conexões externas da clínica</CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="px-8 pb-8 flex flex-col gap-4">
+          <div className="rounded-2xl border border-slate-200 p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="font-semibold text-slate-900 flex items-center gap-2">
+                <CalendarDays className="size-4 text-primary" />
+                Integração Agenda Google
+              </p>
+              <p className="text-sm text-slate-500 mt-1">
+                Status: {clinic.google_access_token ? 'autorizada' : 'não autorizada'}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => connectGoogleIntegration('calendar')}
+                disabled={isConnectingAgenda || isConnectingContacts || isRevokingGoogle}
+              >
+                {isConnectingAgenda ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
+                {clinic.google_access_token ? 'Reautorizar' : 'Autorizar'}
+              </Button>
+              {clinic.google_access_token && (
+                <Button
+                  variant="destructive"
+                  onClick={handleDisconnectGoogle}
+                  disabled={isRevokingGoogle || isConnectingAgenda || isConnectingContacts}
+                >
+                  {isRevokingGoogle ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
+                  Revogar
+                </Button>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="font-semibold text-slate-900 flex items-center gap-2">
+                <Users className="size-4 text-primary" />
+                Integração Contatos Google
+              </p>
+              <p className="text-sm text-slate-500 mt-1">
+                Status: {clinic.google_connected ? 'autorizada' : 'não autorizada'}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => connectGoogleIntegration('contacts')}
+                disabled={isConnectingContacts || isConnectingAgenda || isRevokingGoogle}
+              >
+                {isConnectingContacts ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
+                {clinic.google_connected ? 'Reautorizar' : 'Autorizar'}
+              </Button>
+              {clinic.google_connected && (
+                <Button
+                  variant="destructive"
+                  onClick={handleDisconnectGoogle}
+                  disabled={isRevokingGoogle || isConnectingAgenda || isConnectingContacts}
+                >
+                  {isRevokingGoogle ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
+                  Revogar
+                </Button>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="font-semibold text-slate-900 flex items-center gap-2">
+                <ShieldAlert className="size-4 text-primary" />
+                Integração Google Social
+              </p>
+              <p className="text-sm text-slate-500 mt-1">
+                Status: {hasGoogleSocial ? 'conectada' : 'não conectada'}
+              </p>
+            </div>
+            <Button variant="outline" onClick={handleManageGoogleSocial}>
+              {hasGoogleSocial ? 'Gerenciar / Revogar' : 'Autorizar'}
+            </Button>
+          </div>
+
+          <p className="text-xs text-slate-500">
+            Agenda e Contatos usam a mesma conexão OAuth do Google. Ao revogar, ambas são desconectadas.
+          </p>
         </CardContent>
       </Card>
 

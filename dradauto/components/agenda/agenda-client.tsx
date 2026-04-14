@@ -172,10 +172,10 @@ export function AgendaClient({ clinic, initialAppointments, connected, error }: 
           <p className="text-muted-foreground text-sm">Organize seus horários e pacientes em um só lugar</p>
         </div>
         <div className="flex items-center gap-2 w-full sm:w-auto">
-          {clinic.google_connected && (
+          {clinic.google_access_token && (
             <FindTimeDialog onSelectSlot={handleSlotClick} />
           )}
-          {(!clinic.google_connected && !connected) && <ConnectGoogleBanner />}
+          {(!clinic.google_access_token && !connected) && <ConnectGoogleBanner />}
         </div>
       </div>
 

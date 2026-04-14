@@ -35,10 +35,9 @@ self.addEventListener('activate', (event) => {
 })
 
 self.addEventListener('fetch', (event) => {
-  // Ignorar requisições de API, Clerk, Supabase e que não sejam GET
+  // Ignorar requisições de API, Supabase e que não sejam GET
   if (
     event.request.url.includes('/api/') ||
-    event.request.url.includes('clerk') ||
     event.request.url.includes('supabase') ||
     event.request.method !== 'GET'
   ) {

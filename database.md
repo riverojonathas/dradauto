@@ -7,6 +7,137 @@
 
 ---
 
+## ⚠️ Checklist de Diagnóstico — Falha de Autorização Google
+
+Se a autorização Google aparenta funcionar mas a sincronização falha, verifique:
+
+### 1. **Supabase — RLS Policy**
+- [ ] Ir a **Supabase Dashboard** → tabela `clinics` → **Authentication** → **Enable RLS**
+- [ ] **Criar política de INSERT/UPDATE** para service_role (server-side):
+  ```sql
+  CREATE POLICY "service_role_all_access"
+    ON clinics
+    FOR ALL
+    TO service_role
+    USING (true)
+    WITH CHECK (true);
+  ```
+- [ ] Verificar se há política restritiva que bloqueia UPDATE quando `auth.uid()` não match
+
+### 2. **Supabase — Dados Salvos**
+- [ ] Ir ao **Supabase Dashboard** → tabela `clinics` → buscar por seu `clerk_user_id`
+- [ ] Verificar se colunas foram atualizadas após click em "Autorizar":
+  - `google_connected` = `true` ? (ou ainda `false`?)
+  - `google_access_token` = preenchido ? (ou `NULL`?)
+  - `google_refresh_token` = preenchido ? (ou `NULL`? ← **problema mais comum**)
+  - `google_token_expires_at` = data futura? (ou `NULL`?)
+
+### 3. **Clerk — clerk_user_id Sincronizado**
+- [ ] No **Clerk Dashboard**, abra seu usuário
+- [ ] Copie o **User ID** (deve ser `user_...`)
+- [ ] No **Supabase**, na tabela `clinics`, confira se existe uma linha com esse `clerk_user_id`
+- [ ] Se não existir linha, o onboarding não completou corretamente
+
+### 4. **Browser Console — Logs**
+- [ ] Abra **DevTools** → **Console**
+- [ ] Clique em "Autorizar Google" novamente
+- [ ] Após redirecionar, **procure por mensagens `[Google Callback]`** no console do navegador
+- [ ] Se não aparecerem, quer dizer que o callback **não está sendo executado** (erro de URL)
+
+### 5. **Vercel Logs** (se deployado)
+- [ ] Ir a **Vercel Dashboard** → projeto → **Logs**
+- [ ] Procurar por `[Google Callback]` para ver logs do servidor
+- [ ] Se não aparecerem, verifique se `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` estão definidas
+
+---
+
+## Problemas Comuns — Supabase + Clerk
+
+### 🔴 **Problema: RLS Bloqueando UPDATE**
+**Sintoma:** `error=save_failed` ao autorizar Google.
+
+**Causa:** Tabela `clinics` tem RLS ativado mas **nenhuma política** permitindo `service_role`.
+
+**Solução:** Executar SQL acima em **Supabase Dashboard** → **SQL Editor** → criar a política `service_role_all`.
+
+---
+
+### 🔴 **Problema: clerk_user_id Inválido**
+**Sintoma:** Linha não encontrada na query `.eq('clerk_user_id', userId)`.
+
+**Causa:** `userId` do `auth()` do Clerk pode ser `null` se sessão expirou ou token inválido.
+
+**Solução:** 
+- Adicionar verificação: `if (!userId) throw new Error('Not authenticated')`
+- Verificar em **Clerk Dashboard** se a sessão ativa é válida
+
+---
+
+### 🔴 **Problema: google_refresh_token = NULL Após Callback**
+**Sintoma:** Sync falha com "Google desconectado" mesmo após autorizar.
+
+**Causa mais comum:**
+1. Google não retornou novo `refresh_token` (reutiliza antigo)
+2. Query de recuperação do token antigo falhou silenciosamente
+3. Primeira autorização não salvou corretamente
+
+**Solução:**
+- Verificar em **Supabase** se coluna tem valor: `SELECT google_refresh_token FROM clinics WHERE clerk_user_id = '...'`
+- Se `NULL`, fazer logout/login novamente e reautorizar Google com `prompt=consent` (força reconsentimento)
+- Se ainda `NULL`, pode ser issue de RLS bloqueando INSERT/UPDATE
+
+---
+
+### 🔴 **Problema: Logs [Google Callback] Não Aparecem**
+**Sintoma:** Nenhuma mensagem de log ao clicar "Autorizar".
+
+**Causa:** Callback não está sendo chamado (URL incorreta).
+
+**Solução:**
+- Verificar em **Google Cloud Console** → aplicação → URLs de redirecionamento
+- Comparar com `GOOGLE_REDIRECT_URI` no arquivo `.env.local`
+- Deve ser formato: `https://[seu-dominio]/api/auth/google/callback`
+
+---
+
+
+
+---
+
+## Políticas RLS Recomendadas
+
+### Para `clinics`
+```sql
+-- Permitir service_role (server actions) atualizar qualquer registro
+CREATE POLICY "service_role_all" ON clinics 
+  FOR ALL TO service_role 
+  USING (true) WITH CHECK (true);
+
+-- (Opcional) Permitir usuário autenticado ler seus próprios registros
+CREATE POLICY "user_read_own_clinic" ON clinics
+  FOR SELECT TO authenticated
+  USING (auth.uid() = clerk_user_id::uuid);
+```
+
+### Para `patients`, `appointments`, `medical_records`, etc.
+```sql
+-- Permitir service_role acessar todos (server actions)
+CREATE POLICY "service_role_all" ON patients 
+  FOR ALL TO service_role 
+  USING (true) WITH CHECK (true);
+
+-- (Opcional) Permitir usuário ler dados da sua clínica
+CREATE POLICY "clinic_access" ON patients
+  FOR SELECT TO authenticated
+  USING (
+    clinic_id IN (
+      SELECT id FROM clinics WHERE clerk_user_id::text = auth.uid()
+    )
+  );
+```
+
+---
+
 ## Tabelas
 
 ### clinics
