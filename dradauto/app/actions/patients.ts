@@ -5,6 +5,7 @@ import { getCurrentClinic } from '@/lib/clinic'
 import { getValidAccessToken } from '@/lib/google/auth'
 import { createGoogleContact, updateGoogleContact } from '@/lib/google/contacts'
 import { revalidatePath } from 'next/cache'
+import { toE164BR } from '@/lib/phone'
 
 // Listar pacientes com busca e paginação
 export async function listPatients(params?: {
@@ -74,13 +75,15 @@ export async function createPatient(data: {
   if (!clinic) throw new Error('Clínica não encontrada')
 
   const supabase = createServerClient() as any
+  const normalizedWhatsapp = toE164BR(data.whatsapp)
+  if (!normalizedWhatsapp) throw new Error('WhatsApp inválido. Use DDD e número válidos.')
 
   // Verificar duplicata por WhatsApp
   const { data: existing } = await supabase
     .from('patients')
     .select('id, nome')
     .eq('clinic_id', clinic.id)
-    .eq('whatsapp', data.whatsapp)
+    .eq('whatsapp', normalizedWhatsapp)
     .single()
 
   if (existing) {
@@ -94,7 +97,7 @@ export async function createPatient(data: {
 
   const { data: patient, error } = await supabase
     .from('patients')
-    .insert({ ...data, clinic_id: clinic.id })
+    .insert({ ...data, whatsapp: normalizedWhatsapp, clinic_id: clinic.id })
     .select()
     .single()
 
@@ -106,7 +109,7 @@ export async function createPatient(data: {
       const accessToken = await getValidAccessToken(clinic)
       const resourceName = await createGoogleContact(accessToken, {
         nome: data.nome,
-        whatsapp: data.whatsapp,
+        whatsapp: normalizedWhatsapp,
         especialidadeMedico: clinic.especialidade,
         nomeMedico: clinic.nome,
       })
@@ -142,10 +145,24 @@ export async function updatePatient(id: string, data: {
   if (!clinic) throw new Error('Clínica não encontrada')
 
   const supabase = createServerClient() as any
+  const normalizedWhatsapp =
+    typeof data.whatsapp === 'string'
+      ? toE164BR(data.whatsapp)
+      : undefined
+
+  if (typeof data.whatsapp === 'string' && !normalizedWhatsapp) {
+    throw new Error('WhatsApp inválido. Use DDD e número válidos.')
+  }
+
+  const updatePayload = {
+    ...data,
+    whatsapp: normalizedWhatsapp,
+    updated_at: new Date().toISOString(),
+  }
 
   const { data: patient, error } = await supabase
     .from('patients')
-    .update({ ...data, updated_at: new Date().toISOString() })
+    .update(updatePayload)
     .eq('id', id)
     .eq('clinic_id', clinic.id)
     .select()

@@ -13,6 +13,7 @@ import { createPatient, updatePatient } from '@/app/actions/patients'
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
 import { AlertCircle, Loader2, Link as LinkIcon } from 'lucide-react'
 import Link from 'next/link'
+import { formatPhoneBR } from '@/lib/phone'
 
 interface PatientFormDialogProps {
   isOpen: boolean
@@ -28,7 +29,7 @@ export function PatientFormDialog({ isOpen, onClose, initialData, isProviderConn
   const [saveError, setSaveError] = useState<string | null>(null)
   
   const [nome, setNome] = useState(initialData?.nome || '')
-  const [whatsapp, setWhatsapp] = useState(initialData?.whatsapp || '')
+  const [whatsapp, setWhatsapp] = useState(formatPhoneBR(initialData?.whatsapp || ''))
   const [email, setEmail] = useState(initialData?.email || '')
   const [dataNascimento, setDataNascimento] = useState(initialData?.data_nascimento || '')
   const [cpf, setCpf] = useState(initialData?.cpf || '')
@@ -90,7 +91,7 @@ export function PatientFormDialog({ isOpen, onClose, initialData, isProviderConn
               <InputGroupAddon>+55</InputGroupAddon>
               <InputGroupInput 
                 value={whatsapp} 
-                onChange={(e) => setWhatsapp(e.target.value)} 
+                onChange={(e) => setWhatsapp(formatPhoneBR(e.target.value))} 
                 placeholder="(11) 99999-9999" 
               />
             </InputGroup>
