@@ -10,9 +10,10 @@ import { PatientFormDialog } from './patient-form-dialog'
 import { NewAppointmentDialog } from '@/components/agenda/new-appointment-dialog'
 import { useRouter } from 'next/navigation'
 import { toE164BR } from '@/lib/phone'
+import type { Patient } from '@/types'
 
 interface PatientDetailHeaderProps {
-  patient: any
+  patient: Patient
   isProviderConnected: boolean
 }
 
@@ -132,6 +133,7 @@ export function PatientDetailHeader({ patient, isProviderConnected }: PatientDet
         onClose={() => setIsEditDialogOpen(false)}
         initialData={patient}
         isProviderConnected={isProviderConnected}
+        onDeleted={() => router.push('/pacientes')}
       />
 
       <NewAppointmentDialog

@@ -5,7 +5,48 @@ import { getCurrentClinic } from '@/lib/clinic'
 import { getValidAccessToken } from '@/lib/google/auth'
 import { createGoogleContact, updateGoogleContact } from '@/lib/google/contacts'
 import { revalidatePath } from 'next/cache'
-import { toE164BR } from '@/lib/phone'
+import { normalizeDigits, toE164BR } from '@/lib/phone'
+import { isValidCPF, normalizeCPF } from '@/lib/cpf'
+
+function buildPhoneSearchCandidates(search: string): string[] {
+  const digits = normalizeDigits(search)
+  if (!digits) return []
+
+  const candidates = new Set<string>([digits])
+  const e164 = toE164BR(search)
+
+  if (e164) candidates.add(e164)
+
+  if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) {
+    candidates.add(digits.slice(2))
+  }
+
+  if (digits.length === 10 || digits.length === 11) {
+    candidates.add(`55${digits}`)
+  }
+
+  return Array.from(candidates)
+}
+
+function matchesPhoneSearch(storedPhone: string | null, search: string): boolean {
+  if (!storedPhone) return false
+
+  const normalizedStored = normalizeDigits(storedPhone)
+  if (!normalizedStored) return false
+
+  const candidates = buildPhoneSearchCandidates(search)
+  if (!candidates.length) return false
+
+  return candidates.some((candidate) => {
+    if (!candidate) return false
+
+    if (candidate.length <= 9) {
+      return normalizedStored.endsWith(candidate)
+    }
+
+    return normalizedStored.includes(candidate)
+  })
+}
 
 // Listar pacientes com busca e paginação
 export async function listPatients(params?: {
@@ -20,19 +61,38 @@ export async function listPatients(params?: {
   const { search, page = 1, limit = 20 } = params || {}
   const from = (page - 1) * limit
   const to = from + limit - 1
+  const trimmedSearch = search?.trim() || ''
 
-  let query = supabase
+  if (trimmedSearch) {
+    const searchLower = trimmedSearch.toLowerCase()
+
+    const { data, error } = await supabase
+      .from('patients')
+      .select('*, appointments(count)')
+      .eq('clinic_id', clinic.id)
+      .order('created_at', { ascending: false })
+
+    if (error) throw new Error(error.message)
+
+    const filtered = (data || []).filter((patient: any) => {
+      const nameMatch = (patient.nome || '').toLowerCase().includes(searchLower)
+      if (nameMatch) return true
+
+      return matchesPhoneSearch(patient.whatsapp, trimmedSearch)
+    })
+
+    return {
+      patients: filtered.slice(from, to + 1),
+      total: filtered.length,
+    }
+  }
+
+  const { data, error, count } = await supabase
     .from('patients')
     .select('*, appointments(count)', { count: 'exact' })
     .eq('clinic_id', clinic.id)
     .order('created_at', { ascending: false })
     .range(from, to)
-
-  if (search) {
-    query = query.ilike('nome', `%${search}%`)
-  }
-
-  const { data, error, count } = await query
 
   if (error) throw new Error(error.message)
   return { patients: data || [], total: count || 0 }
@@ -78,6 +138,11 @@ export async function createPatient(data: {
   const normalizedWhatsapp = toE164BR(data.whatsapp)
   if (!normalizedWhatsapp) throw new Error('WhatsApp inválido. Use DDD e número válidos.')
 
+  const normalizedCpf = data.cpf ? normalizeCPF(data.cpf) : undefined
+  if (normalizedCpf && !isValidCPF(normalizedCpf)) {
+    throw new Error('CPF inválido')
+  }
+
   // Verificar duplicata por WhatsApp
   const { data: existing } = await supabase
     .from('patients')
@@ -97,14 +162,19 @@ export async function createPatient(data: {
 
   const { data: patient, error } = await supabase
     .from('patients')
-    .insert({ ...data, whatsapp: normalizedWhatsapp, clinic_id: clinic.id })
+    .insert({
+      ...data,
+      cpf: normalizedCpf || null,
+      whatsapp: normalizedWhatsapp,
+      clinic_id: clinic.id,
+    })
     .select()
     .single()
 
   if (error) throw new Error(error.message)
 
   // Sincronizar com Google Contacts (se conectado)
-  if (clinic.google_connected && clinic.google_refresh_token) {
+  if (clinic.google_access_token && clinic.google_refresh_token) {
     try {
       const accessToken = await getValidAccessToken(clinic)
       const resourceName = await createGoogleContact(accessToken, {
@@ -150,12 +220,22 @@ export async function updatePatient(id: string, data: {
       ? toE164BR(data.whatsapp)
       : undefined
 
+  const normalizedCpf =
+    typeof data.cpf === 'string'
+      ? normalizeCPF(data.cpf)
+      : undefined
+
   if (typeof data.whatsapp === 'string' && !normalizedWhatsapp) {
     throw new Error('WhatsApp inválido. Use DDD e número válidos.')
   }
 
+  if (typeof data.cpf === 'string' && normalizedCpf && !isValidCPF(normalizedCpf)) {
+    throw new Error('CPF inválido')
+  }
+
   const updatePayload = {
     ...data,
+    cpf: normalizedCpf,
     whatsapp: normalizedWhatsapp,
     updated_at: new Date().toISOString(),
   }
@@ -213,7 +293,7 @@ export async function searchPatients(query: string) {
 // Sincronizar TODOS os pacientes sem google_contact_id (bulk sync)
 export async function syncAllPatientsToGoogle() {
   const clinic = await getCurrentClinic()
-  if (!clinic?.google_connected) {
+  if (!clinic?.google_access_token) {
     return { success: false, error: 'not_connected' }
   }
 
@@ -259,4 +339,166 @@ export async function syncAllPatientsToGoogle() {
 
   revalidatePath('/pacientes')
   return { success: true, synced, failed, remaining: patients.length - synced }
+}
+
+export async function getPatientsSyncStats() {
+  const clinic = await getCurrentClinic()
+  if (!clinic) throw new Error('Clínica não encontrada')
+
+  const supabase = createServerClient() as any
+
+  const [{ count: total }, { count: unsynced }] = await Promise.all([
+    supabase
+      .from('patients')
+      .select('id', { count: 'exact', head: true })
+      .eq('clinic_id', clinic.id),
+    supabase
+      .from('patients')
+      .select('id', { count: 'exact', head: true })
+      .eq('clinic_id', clinic.id)
+      .is('google_contact_id', null),
+  ])
+
+  return {
+    total: total || 0,
+    unsynced: unsynced || 0,
+  }
+}
+
+export async function syncPatientToGoogle(patientId: string) {
+  const clinic = await getCurrentClinic()
+  if (!clinic) throw new Error('Clínica não encontrada')
+
+  if (!clinic.google_access_token || !clinic.google_refresh_token) {
+    return { success: false, error: 'not_connected' }
+  }
+
+  const supabase = createServerClient() as any
+
+  const { data: patient, error } = await supabase
+    .from('patients')
+    .select('id, nome, whatsapp, google_contact_id')
+    .eq('id', patientId)
+    .eq('clinic_id', clinic.id)
+    .single()
+
+  if (error || !patient) {
+    return { success: false, error: 'not_found' }
+  }
+
+  if (patient.google_contact_id) {
+    return { success: true, alreadySynced: true }
+  }
+
+  try {
+    const accessToken = await getValidAccessToken(clinic)
+    const resourceName = await createGoogleContact(accessToken, {
+      nome: patient.nome,
+      whatsapp: patient.whatsapp,
+      especialidadeMedico: clinic.especialidade,
+      nomeMedico: clinic.nome,
+    })
+
+    if (!resourceName) {
+      return { success: false, error: 'sync_failed' }
+    }
+
+    await supabase
+      .from('patients')
+      .update({ google_contact_id: resourceName })
+      .eq('id', patient.id)
+      .eq('clinic_id', clinic.id)
+
+    revalidatePath('/pacientes')
+    revalidatePath(`/pacientes/${patient.id}`)
+    return { success: true }
+  } catch (e: any) {
+    const message = String(e?.message || '')
+
+    if (message === 'GOOGLE_NOT_CONNECTED' || message === 'GOOGLE_TOKEN_MISSING') {
+      // Token expirou e refresh_token está faltando — precisa reconectar em Configurações
+      return { success: false, error: 'token_revoked' }
+    }
+    if (message === 'GOOGLE_CONTACTS_SCOPE_MISSING') {
+      return { success: false, error: 'scope_missing' }
+    }
+    if (message === 'GOOGLE_TOKEN_REVOKED') {
+      return { success: false, error: 'token_revoked' }
+    }
+    if (message.startsWith('GOOGLE_CONTACTS_API_ERROR:')) {
+      const parts = message.split(':')
+      const status = parts[1] || 'unknown'
+      const detail = parts.slice(2).join(':') || 'Erro ao criar contato no Google.'
+      return {
+        success: false,
+        error: 'google_api_error',
+        detail: `Google API ${status}: ${detail}`,
+      }
+    }
+
+    return { success: false, error: 'sync_failed' }
+  }
+}
+
+export async function deletePatient(patientId: string) {
+  const clinic = await getCurrentClinic()
+  if (!clinic) throw new Error('Clínica não encontrada')
+
+  const supabase = createServerClient() as any
+
+  const { data: patient } = await supabase
+    .from('patients')
+    .select('id, nome')
+    .eq('id', patientId)
+    .eq('clinic_id', clinic.id)
+    .single()
+
+  if (!patient) {
+    return { success: false, error: 'not_found' }
+  }
+
+  const { count: recordsCount } = await supabase
+    .from('medical_records')
+    .select('id', { count: 'exact', head: true })
+    .eq('clinic_id', clinic.id)
+    .eq('patient_id', patientId)
+
+  if ((recordsCount || 0) > 0) {
+    return {
+      success: false,
+      error: 'has_medical_records',
+      message: 'Este paciente possui prontuários vinculados e não pode ser excluído.',
+    }
+  }
+
+  await Promise.all([
+    supabase
+      .from('appointments')
+      .update({ patient_id: null })
+      .eq('clinic_id', clinic.id)
+      .eq('patient_id', patientId),
+    supabase
+      .from('anamnesis')
+      .update({ patient_id: null })
+      .eq('clinic_id', clinic.id)
+      .eq('patient_id', patientId),
+    supabase
+      .from('privacy_consents')
+      .update({ patient_id: null })
+      .eq('patient_id', patientId),
+  ])
+
+  const { error } = await supabase
+    .from('patients')
+    .delete()
+    .eq('id', patientId)
+    .eq('clinic_id', clinic.id)
+
+  if (error) {
+    throw new Error('Erro ao excluir paciente: ' + error.message)
+  }
+
+  revalidatePath('/pacientes')
+  revalidatePath(`/pacientes/${patientId}`)
+  return { success: true }
 }

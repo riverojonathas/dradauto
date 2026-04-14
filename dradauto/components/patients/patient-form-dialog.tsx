@@ -9,22 +9,26 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
-import { createPatient, updatePatient } from '@/app/actions/patients'
+import { createPatient, updatePatient, deletePatient } from '@/app/actions/patients'
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
-import { AlertCircle, Loader2, Link as LinkIcon } from 'lucide-react'
+import { AlertCircle, Loader2, Link as LinkIcon, Trash2 } from 'lucide-react'
 import Link from 'next/link'
 import { formatPhoneBR } from '@/lib/phone'
+import { formatCPF, isValidCPF, normalizeCPF } from '@/lib/cpf'
+import type { Patient } from '@/types'
 
 interface PatientFormDialogProps {
   isOpen: boolean
   onClose: () => void
-  initialData?: any // if passed, it's an update
+  initialData?: Patient // if passed, it's an update
   isProviderConnected: boolean
+  onDeleted?: () => void
 }
 
-export function PatientFormDialog({ isOpen, onClose, initialData, isProviderConnected }: PatientFormDialogProps) {
+export function PatientFormDialog({ isOpen, onClose, initialData, isProviderConnected, onDeleted }: PatientFormDialogProps) {
   const isEditing = !!initialData
   const [isLoading, setIsLoading] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
   const [duplicateError, setDuplicateError] = useState<{ id: string, name: string } | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   
@@ -32,15 +36,23 @@ export function PatientFormDialog({ isOpen, onClose, initialData, isProviderConn
   const [whatsapp, setWhatsapp] = useState(formatPhoneBR(initialData?.whatsapp || ''))
   const [email, setEmail] = useState(initialData?.email || '')
   const [dataNascimento, setDataNascimento] = useState(initialData?.data_nascimento || '')
-  const [cpf, setCpf] = useState(initialData?.cpf || '')
+  const [cpf, setCpf] = useState(formatCPF(initialData?.cpf || ''))
   const [notes, setNotes] = useState(initialData?.notes || '')
+  const cpfDigits = normalizeCPF(cpf)
+  const isCpfValid = cpfDigits.length === 0 || isValidCPF(cpfDigits)
   
   // O sync é automático no action createPatient se isProviderConnected
   
   const handleSubmit = async () => {
     try {
+      if (!isCpfValid) {
+        setSaveError('CPF inválido. Confira o número informado.')
+        return
+      }
+
       setIsLoading(true)
       setDuplicateError(null)
+      setSaveError(null)
 
       if (isEditing) {
         await updatePatient(initialData.id, {
@@ -60,6 +72,36 @@ export function PatientFormDialog({ isOpen, onClose, initialData, isProviderConn
       setSaveError("Erro ao salvar: " + error.message)
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!isEditing || !initialData?.id) return
+
+    const confirmed = window.confirm(
+      'Tem certeza que deseja excluir este paciente? Esta ação não pode ser desfeita.'
+    )
+    if (!confirmed) return
+
+    setIsDeleting(true)
+    setSaveError(null)
+    try {
+      const res = await deletePatient(initialData.id)
+      if (!res.success) {
+        if (res.error === 'has_medical_records') {
+          setSaveError(res.message ?? 'Este paciente possui prontuários vinculados e não pode ser excluído.')
+          return
+        }
+        setSaveError('Não foi possível excluir o paciente.')
+        return
+      }
+
+      onClose()
+      onDeleted?.()
+    } catch (error: any) {
+      setSaveError('Erro ao excluir: ' + error.message)
+    } finally {
+      setIsDeleting(false)
     }
   }
 
@@ -110,7 +152,10 @@ export function PatientFormDialog({ isOpen, onClose, initialData, isProviderConn
 
           <div className="grid gap-1.5">
             <Label>CPF</Label>
-            <Input value={cpf} onChange={(e) => setCpf(e.target.value)} placeholder="000.000.000-00" />
+            <Input value={cpf} onChange={(e) => setCpf(formatCPF(e.target.value))} placeholder="000.000.000-00" />
+            {!isCpfValid && (
+              <p className="text-xs text-destructive">Informe um CPF válido.</p>
+            )}
           </div>
 
           <div className="grid gap-1.5">
@@ -154,8 +199,19 @@ export function PatientFormDialog({ isOpen, onClose, initialData, isProviderConn
         )}
 
         <DialogFooter className="px-8 py-6 border-t border-border/50 bg-muted/30">
+          {isEditing && (
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={isLoading || isDeleting}
+              className="mr-auto"
+            >
+              {isDeleting ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Trash2 className="mr-2 size-4" />}
+              Excluir Paciente
+            </Button>
+          )}
           <Button variant="ghost" onClick={onClose} className="text-muted-foreground">Cancelar</Button>
-          <Button onClick={handleSubmit} disabled={isLoading || !nome || !whatsapp}>
+          <Button onClick={handleSubmit} disabled={isLoading || isDeleting || !nome || !whatsapp || !isCpfValid}>
             {isLoading && <Loader2 className="mr-2 size-4 animate-spin" />}
             {isEditing ? 'Salvar Alterações' : 'Criar Paciente'}
           </Button>

@@ -1,7 +1,7 @@
 'use server'
 
-import { auth, clerkClient } from '@clerk/nextjs/server'
-import { redirect } from 'next/navigation'
+import { getCurrentUser } from '@/lib/supabase/auth-server'
+import { toE164BR } from '@/lib/phone'
 
 export type OnboardingData = {
   // Step 1 — dados pessoais
@@ -9,8 +9,7 @@ export type OnboardingData = {
   crm: string
   crmEstado: string
   especialidade: string
-  // Step 2 — dados da clínica
-  nomeClinica: string
+  // Step 2 — contato da clínica
   whatsappClinica: string
   // Step 3 — configurações
   valorConsulta: number
@@ -20,46 +19,80 @@ export type OnboardingData = {
 import { createServerClient } from '@/lib/supabase/server'
 
 export async function completeOnboarding(data: OnboardingData) {
-  const { userId } = await auth()
-  if (!userId) throw new Error('Não autenticado')
+  const user = await getCurrentUser()
+  if (!user) throw new Error('Não autenticado')
 
-  const client = await clerkClient()
+  const nomeCompleto = data.nomeCompleto.trim()
+  const crm = data.crm.trim()
+  const crmEstado = data.crmEstado.trim()
+  const especialidade = data.especialidade.trim()
+  const whatsapp = toE164BR(data.whatsappClinica)
+  const valorConsulta = Number(data.valorConsulta)
+  const duracaoConsulta = Number(data.duracaoConsulta)
 
-  await client.users.updateUser(userId, {
-    publicMetadata: {
-      onboarded: true,
-      role: 'doctor',
-      crm: `${data.crm}-${data.crmEstado}`,
-      especialidade: data.especialidade,
-      nomeClinica: data.nomeClinica,
-      whatsappClinica: data.whatsappClinica,
-      valorConsulta: data.valorConsulta,
-      duracaoConsulta: data.duracaoConsulta,
-    },
-    // Atualiza o nome real do médico no Clerk
-    firstName: data.nomeCompleto.split(' ')[0],
-    lastName: data.nomeCompleto.split(' ').slice(1).join(' '),
-  })
+  if (!nomeCompleto || !crm || !crmEstado || !especialidade) {
+    return { success: false, error: 'Preencha todos os campos obrigatórios.' }
+  }
+
+  if (!whatsapp) {
+    return { success: false, error: 'Informe um WhatsApp válido com DDD.' }
+  }
+
+  if (!Number.isFinite(valorConsulta) || valorConsulta < 0) {
+    return { success: false, error: 'Informe um valor de consulta válido.' }
+  }
+
+  if (!Number.isFinite(duracaoConsulta) || duracaoConsulta <= 0) {
+    return { success: false, error: 'Informe uma duração de consulta válida.' }
+  }
 
   // Salvar no Supabase
   const supabase = createServerClient()
-  
-  // Usamos tipagem explícita para evitar erros de inferência do TS com o Database gerado
-  const { error } = await supabase.from('clinics' as any).upsert({
-    clerk_user_id: userId,
-    nome: data.nomeClinica,
-    crm: data.crm,
-    crm_estado: data.crmEstado,
-    especialidade: data.especialidade,
-    whatsapp: data.whatsappClinica,
-    valor_consulta: data.valorConsulta,
-    duracao_consulta: data.duracaoConsulta,
-    nome_secretaria: 'Sofia',
-  } as any, { onConflict: 'clerk_user_id' })
+  const clinicsTable = supabase.from('clinics' as any) as any
 
-  if (error) {
-    console.error('Erro ao salvar no Supabase:', error)
-    // Não vamos bloquear o redirect por enquanto, mas logamos o erro
+  const payload = {
+    user_id: user.id,
+    nome: nomeCompleto,
+    crm,
+    crm_estado: crmEstado,
+    especialidade,
+    whatsapp,
+    valor_consulta: valorConsulta,
+    duracao_consulta: duracaoConsulta,
+    nome_secretaria: 'Sofia',
+  }
+
+  const { data: existingClinic, error: fetchError } = await clinicsTable
+    .select('id')
+    .eq('user_id', user.id)
+    .maybeSingle()
+
+  const clinicId = (existingClinic as { id?: string } | null)?.id
+
+  if (fetchError) {
+    console.error('Erro ao buscar clínica atual:', fetchError)
+    return { success: false, error: 'Não foi possível carregar sua clínica.' }
+  }
+
+  if (clinicId) {
+    const { error: updateError } = await clinicsTable
+      .update(payload as any)
+      .eq('id', clinicId)
+
+    if (updateError) {
+      console.error('Erro ao atualizar onboarding no Supabase:', updateError)
+      return { success: false, error: 'Não foi possível salvar seu onboarding.' }
+    }
+
+    return { success: true }
+  }
+
+  const { error: insertError } = await clinicsTable
+    .insert(payload as any)
+
+  if (insertError) {
+    console.error('Erro ao criar clínica no Supabase:', insertError)
+    return { success: false, error: 'Não foi possível criar sua clínica.' }
   }
 
   return { success: true }

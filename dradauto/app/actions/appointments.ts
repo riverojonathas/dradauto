@@ -115,7 +115,7 @@ export async function createAppointment(data: CreateAppointmentInput) {
   }
 
   // Tentar criar no Google Calendar (não falha a operação se o Google estiver offline)
-  if (clinic.google_connected) {
+  if (clinic.google_access_token) {
     try {
       const { google_event_id, google_meet_link } = await createCalendarEvent(clinic, appointment)
       await supabase.from('appointments').update({ google_event_id, google_meet_link })
@@ -160,7 +160,7 @@ export async function rescheduleAppointment(
 
   if (updateError) throw new Error(updateError.message)
 
-  if (clinic.google_connected && current.google_event_id) {
+  if (clinic.google_access_token && current.google_event_id) {
     try {
       await updateCalendarEvent(clinic, current.google_event_id, newScheduledAt, durationMinutes ?? current.duration_minutes)
     } catch { /* silencioso */ }
@@ -190,7 +190,7 @@ export async function cancelAppointment(id: string) {
 
   if (updateError) throw new Error(updateError.message)
 
-  if (clinic.google_connected && current.google_event_id) {
+  if (clinic.google_access_token && current.google_event_id) {
     try { await deleteCalendarEvent(clinic, current.google_event_id) } catch { /* silencioso */ }
   }
 }

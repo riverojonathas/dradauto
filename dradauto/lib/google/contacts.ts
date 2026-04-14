@@ -1,4 +1,5 @@
 const PEOPLE_API = 'https://people.googleapis.com/v1'
+import { normalizeDigits } from '@/lib/phone'
 
 export interface GoogleContactData {
   nome: string
@@ -7,20 +8,29 @@ export interface GoogleContactData {
   nomeMedico?: string
 }
 
+function toGooglePhone(value: string): string | null {
+  const digits = normalizeDigits(value)
+  if (!digits) return null
+  return `+${digits}`
+}
+
 // Criar contato no Google Contacts do médico
 export async function createGoogleContact(
   accessToken: string,
   data: GoogleContactData
 ): Promise<string | null> {
+  const phone = toGooglePhone(data.whatsapp)
+
   const body = {
     names: [{ givenName: data.nome }],
-    phoneNumbers: [
-      {
-        value: data.whatsapp,
-        type: 'mobile',
-        canonicalForm: data.whatsapp,
-      },
-    ],
+    phoneNumbers: phone
+      ? [
+          {
+            value: phone,
+            type: 'mobile',
+          },
+        ]
+      : [],
     biographies: [
       {
         value: `Paciente dradauto${data.especialidadeMedico ? ` — ${data.especialidadeMedico}` : ''}`,
@@ -40,8 +50,18 @@ export async function createGoogleContact(
 
   if (res.status === 403) throw new Error('GOOGLE_CONTACTS_SCOPE_MISSING')
   if (!res.ok) {
-    console.error('Google Contacts create error:', await res.text())
-    return null // Falha silenciosa — paciente é salvo no banco mesmo sem contato
+    const raw = await res.text()
+    console.error('Google Contacts create error:', raw)
+
+    let detail = raw
+    try {
+      const parsed = JSON.parse(raw)
+      detail = parsed?.error?.message || raw
+    } catch {
+      // mantém raw quando não for JSON
+    }
+
+    throw new Error(`GOOGLE_CONTACTS_API_ERROR:${res.status}:${detail.slice(0, 240)}`)
   }
 
   const contact = await res.json()
@@ -55,6 +75,8 @@ export async function updateGoogleContact(
   resourceName: string,
   data: GoogleContactData
 ): Promise<boolean> {
+  const phone = toGooglePhone(data.whatsapp)
+
   // 1. Buscar etag atual (obrigatório para update)
   const getRes = await fetch(
     `${PEOPLE_API}/${resourceName}?personFields=names,phoneNumbers,biographies`,
@@ -67,7 +89,7 @@ export async function updateGoogleContact(
   const body = {
     ...current,
     names: [{ givenName: data.nome }],
-    phoneNumbers: [{ value: data.whatsapp, type: 'mobile' }],
+    phoneNumbers: phone ? [{ value: phone, type: 'mobile' }] : [],
   }
 
   const res = await fetch(

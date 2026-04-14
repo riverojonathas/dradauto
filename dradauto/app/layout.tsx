@@ -33,7 +33,6 @@ export const viewport: Viewport = {
   maximumScale: 1,
 };
 
-import { ClerkProvider } from "@clerk/nextjs";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { PWARegister } from "@/components/shared/pwa-register";
 
@@ -43,21 +42,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <ClerkProvider
-      afterSignOutUrl="/sign-in"
-      signInUrl="/sign-in"
-      signUpUrl="/sign-up"
+    <html
+      lang="pt-BR"
+      suppressHydrationWarning
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <html
-        lang="pt-BR"
-        suppressHydrationWarning
-        className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-      >
-        <body className="min-h-full flex flex-col">
-          <TooltipProvider>{children}</TooltipProvider>
-          <PWARegister />
-        </body>
-      </html>
-    </ClerkProvider>
+      <body className="min-h-full flex flex-col">
+        <TooltipProvider>{children}</TooltipProvider>
+        <PWARegister />
+      </body>
+    </html>
   );
 }

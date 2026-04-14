@@ -1,11 +1,13 @@
 import Link from 'next/link'
 import { Card } from '@/components/ui/card'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { ArrowRight } from 'lucide-react'
+import { ArrowRight, Phone, Stethoscope } from 'lucide-react'
 import { GoogleSyncBadge } from './google-sync-badge'
+import { formatPhoneBR } from '@/lib/phone'
+import type { Patient } from '@/types'
 
 interface PatientCardProps {
-  patient: any
+  patient: Patient & { appointments?: Array<{ count: number }> }
   isProviderConnected: boolean
 }
 
@@ -17,45 +19,55 @@ export function PatientCard({ patient, isProviderConnected }: PatientCardProps) 
   const consultCount = patient.appointments?.[0]?.count || 0
 
   return (
-    <Link href={`/pacientes/${patient.id}`}>
-      <Card className="flex items-center justify-between p-5 rounded-2xl border border-transparent hover:border-slate-200 hover:bg-slate-50/80 transition-all group shadow-sm">
-        <div className="flex items-center gap-5">
-          <Avatar className="size-12 border-2 border-white shadow-md ring-1 ring-slate-100">
-            <AvatarFallback className="bg-primary/5 text-primary font-bold text-sm">
-              {getInitials(patient.nome)}
-            </AvatarFallback>
-          </Avatar>
-          
-          <div>
-            <div className="text-base font-bold text-slate-900 group-hover:text-primary transition-colors flex items-center gap-3">
-              {patient.nome}
-              <span className="text-sm font-medium text-slate-500 font-mono bg-slate-100 px-2 py-0.5 rounded-md">
-                {patient.whatsapp}
-              </span>
-            </div>
-            
-            <div className="flex items-center gap-4 mt-1.5">
-              <div className="text-sm text-slate-500 font-medium">
-                {consultCount} {consultCount === 1 ? 'consulta' : 'consultas'}
-              </div>
-              <GoogleSyncBadge 
-                patientId={patient.id}
-                googleContactId={patient.google_contact_id}
-                isProviderConnected={isProviderConnected}
-                patientName={patient.nome}
-                patientWhatsapp={patient.whatsapp}
-              />
-            </div>
-          </div>
-        </div>
+    <Card className="rounded-2xl border border-slate-200/80 bg-white shadow-sm transition-all hover:shadow-md hover:border-slate-300">
+      <div className="flex items-start justify-between gap-3 p-3 sm:p-4">
+        <Link
+          href={`/pacientes/${patient.id}`}
+          className="group min-w-0 flex-1 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          aria-label={`Abrir perfil de ${patient.nome}`}
+        >
+          <div className="flex items-start gap-3">
+            <Avatar className="size-10 sm:size-11 border border-slate-200 shadow-sm shrink-0">
+              <AvatarFallback className="bg-primary/5 text-primary font-semibold text-xs sm:text-sm">
+                {getInitials(patient.nome)}
+              </AvatarFallback>
+            </Avatar>
 
-        <div className="flex items-center gap-3 opacity-0 translate-x-4 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300">
-          <span className="text-sm font-bold text-primary">Ver perfil</span>
-          <div className="size-8 rounded-full bg-primary/10 flex items-center justify-center">
-            <ArrowRight className="size-4 text-primary" />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <h3 className="truncate text-sm sm:text-base font-semibold text-slate-900 group-hover:text-primary transition-colors">
+                  {patient.nome}
+                </h3>
+                <div className="size-6 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0 opacity-80 group-hover:opacity-100 transition-opacity">
+                  <ArrowRight className="size-3.5" />
+                </div>
+              </div>
+
+              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs sm:text-sm text-slate-600">
+                <span className="inline-flex items-center gap-1.5 min-w-0">
+                  <Phone className="size-3.5 text-slate-400 shrink-0" />
+                  <span className="truncate font-medium">{formatPhoneBR(patient.whatsapp)}</span>
+                </span>
+
+                <span className="inline-flex items-center gap-1.5 text-slate-500">
+                  <Stethoscope className="size-3.5 text-slate-400" />
+                  {consultCount} {consultCount === 1 ? 'consulta' : 'consultas'}
+                </span>
+              </div>
+            </div>
           </div>
+        </Link>
+
+        <div className="shrink-0 pt-0.5">
+          <GoogleSyncBadge
+            patientId={patient.id}
+            googleContactId={patient.google_contact_id}
+            isProviderConnected={isProviderConnected}
+            patientName={patient.nome}
+            patientWhatsapp={patient.whatsapp}
+          />
         </div>
-      </Card>
-    </Link>
+      </div>
+    </Card>
   )
 }

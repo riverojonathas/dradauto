@@ -1,15 +1,15 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { CloudUpload, Loader2, Plus, Search } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { useDebounce } from 'use-debounce'
-import { listPatients, syncAllPatientsToGoogle } from '@/app/actions/patients'
+import { listPatients, syncAllPatientsToGoogle, getPatientsSyncStats } from '@/app/actions/patients'
 import { PatientCard } from './patient-card'
 import { PatientFormDialog } from './patient-form-dialog'
+import type { Patient } from '@/types'
 
 interface PatientsListProps {
   isProviderConnected: boolean
@@ -20,8 +20,10 @@ export function PatientsList({ isProviderConnected }: PatientsListProps) {
   const [query, setQuery] = useState('')
   const [debouncedQuery] = useDebounce(query, 400)
   
-  const [patients, setPatients] = useState<any[]>([])
-  const [total, setTotal] = useState(0)
+  type PatientListItem = Patient & { appointments?: Array<{ count: number }> }
+
+  const [patients, setPatients] = useState<PatientListItem[]>([])
+  const [unsyncedTotal, setUnsyncedTotal] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
   
   const [isSyncing, setIsSyncing] = useState(false)
@@ -37,9 +39,13 @@ export function PatientsList({ isProviderConnected }: PatientsListProps) {
   const fetchPatients = async () => {
     setIsLoading(true)
     try {
-      const res = await listPatients({ search: debouncedQuery, limit: 100 })
+      const [res, syncStats] = await Promise.all([
+        listPatients({ search: debouncedQuery, limit: 100 }),
+        isProviderConnected ? getPatientsSyncStats() : Promise.resolve({ unsynced: 0, total: 0 }),
+      ])
+
       setPatients(res.patients)
-      setTotal(res.total)
+      setUnsyncedTotal(syncStats.unsynced)
     } catch (e) {
       console.error(e)
     } finally {
@@ -69,8 +75,8 @@ export function PatientsList({ isProviderConnected }: PatientsListProps) {
     }
   }
 
-  // Descobrir quantos não estão sincronizados (dos que aparecem em tela, mas como a busca tem limit 100, é só uma métrica local)
-  const unsyncedCount = patients.filter(p => !p.google_contact_id).length
+  const hasQuery = debouncedQuery.trim().length > 0
+  const isEmptyResult = !isLoading && patients.length === 0
 
   return (
     <div className="flex flex-col gap-6">
@@ -78,26 +84,26 @@ export function PatientsList({ isProviderConnected }: PatientsListProps) {
         <div className="relative w-full sm:max-w-md">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 size-4 text-slate-400" />
           <Input 
-            placeholder="Buscar por nome ou WhatsApp..." 
+            placeholder="Buscar por nome ou WhatsApp (com ou sem DDI)..." 
             className="pl-11 h-12 rounded-full border-slate-200 bg-white"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
         </div>
-        <Button className="rounded-full shadow-md" size="lg" onClick={() => setIsDialogOpen(true)}>
+        <Button className="w-full sm:w-auto rounded-full shadow-md" size="lg" onClick={() => setIsDialogOpen(true)}>
           <Plus className="mr-2 size-5" />
           Novo Paciente
         </Button>
       </div>
 
-      {isProviderConnected && unsyncedCount > 0 && !query && (
+      {isProviderConnected && unsyncedTotal > 0 && !hasQuery && (
         <Alert className="border-primary/20 bg-primary/5 rounded-2xl shadow-sm relative overflow-hidden">
           <CloudUpload className="size-5 text-primary absolute left-4 top-4" />
           <div className="pl-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
               <AlertTitle className="text-base text-slate-900">Existem pacientes não sincronizados</AlertTitle>
               <AlertDescription className="text-slate-600 mt-1">
-                Sincronize para ver o nome deles na tela do seu celular quando ligarem para você.
+                {unsyncedTotal} paciente(s) ainda não foram sincronizados com o Google Contacts.
               </AlertDescription>
             </div>
             <Button size="sm" onClick={handleBulkSync} disabled={isSyncing} className="shrink-0 bg-primary/20 text-primary hover:bg-primary/30">
@@ -129,13 +135,19 @@ export function PatientsList({ isProviderConnected }: PatientsListProps) {
             <Loader2 className="size-8 animate-spin opacity-50" />
             <p className="text-sm font-medium">Buscando pacientes...</p>
           </div>
-        ) : patients.length === 0 ? (
+        ) : isEmptyResult ? (
           <div className="py-20 flex flex-col items-center justify-center text-slate-400 bg-white rounded-3xl border border-dashed border-slate-200">
             <Search className="size-10 opacity-20 mb-3" />
-            <p className="text-lg font-bold text-slate-500">Nenhum paciente encontrado</p>
-            <p className="text-sm mt-1 mb-6 text-center">Não encontramos resultados para sua busca.</p>
+            <p className="text-lg font-bold text-slate-500">
+              {hasQuery ? 'Nenhum resultado encontrado' : 'Nenhum paciente cadastrado'}
+            </p>
+            <p className="text-sm mt-1 mb-6 text-center">
+              {hasQuery
+                ? 'Tente buscar por outro nome ou telefone.'
+                : 'Cadastre o primeiro paciente para começar a montar sua base.'}
+            </p>
             <Button variant="outline" onClick={() => setIsDialogOpen(true)} className="rounded-full">
-              Cadastrar Agora
+              {hasQuery ? 'Cadastrar novo paciente' : 'Cadastrar primeiro paciente'}
             </Button>
           </div>
         ) : (

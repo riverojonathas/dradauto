@@ -1,6 +1,7 @@
 "use client"
 
 import { Bell, Search, Menu } from "lucide-react"
+import { useRouter } from 'next/navigation'
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import {
@@ -13,8 +14,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { MobileNav } from "./mobile-nav"
+import { createClient } from '@/lib/supabase/client'
 
-import { SignOutButton } from "@clerk/nextjs"
+
 
 interface HeaderProps {
   title: string
@@ -25,6 +27,15 @@ interface HeaderProps {
 }
 
 export function Header({ title, user }: HeaderProps) {
+  const router = useRouter()
+
+  const handleSignOut = async () => {
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    router.push('/sign-in')
+    router.refresh()
+  }
+
   return (
     <header className="fixed right-0 top-0 z-30 flex h-[72px] w-full items-center bg-background/80 backdrop-blur-md border-b border-border/50 md:w-[calc(100%-var(--sidebar-width))]">
       <div className="flex w-full items-center justify-between px-6 md:px-12">
@@ -70,9 +81,12 @@ export function Header({ title, user }: HeaderProps) {
                   <DropdownMenuItem className="rounded-xl px-3 py-2.5 cursor-pointer">Configurações</DropdownMenuItem>
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator className="my-2" />
-                <SignOutButton>
-                  <DropdownMenuItem className="text-destructive rounded-xl px-3 py-2.5 cursor-pointer font-semibold">Sair</DropdownMenuItem>
-                </SignOutButton>
+                <DropdownMenuItem
+                  onClick={handleSignOut}
+                  className="text-destructive rounded-xl px-3 py-2.5 cursor-pointer font-semibold"
+                >
+                  Sair
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>

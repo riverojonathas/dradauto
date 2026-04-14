@@ -5,8 +5,13 @@ import { getFreeBusy, findFreeSlots } from '@/lib/google/calendar'
 
 export async function findNextFreeSlots(durationMinutes: number) {
   const clinic = await getCurrentClinic()
-  if (!clinic || !clinic.google_connected) {
-    throw new Error('Google Calendar não conectado')
+  if (!clinic) {
+    throw new Error('Clínica não encontrada')
+  }
+  
+  // Verificar se há token de acesso do Google (pode ter sido sincronizado via qualquer fluxo)
+  if (!clinic.google_access_token) {
+    throw new Error('Google Calendar não conectado. Autorize a integração em Configurações > Integrações.')
   }
 
   const today = new Date()

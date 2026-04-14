@@ -2,36 +2,37 @@
 
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { CheckCircle2, Clock3, AlertCircle, Video, FileText, ArrowUpRight } from 'lucide-react'
+import { CheckCircle2, Clock3, XCircle, Video, FileText } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { cn } from '@/lib/utils'
 import Link from 'next/link'
+import type { Appointment } from '@/types'
 
 interface AppointmentHistoryProps {
-  appointments: any[]
+  appointments: Array<
+    Pick<
+      Appointment,
+      'id' | 'scheduled_at' | 'tipo' | 'status' | 'payment_status' | 'observacoes'
+    >
+  >
 }
 
 const statusConfig = {
-  confirmada: {
+  confirmed: {
     label: "Confirmada",
     className: "bg-emerald-100 text-emerald-700 border-none shadow-none",
     icon: CheckCircle2,
   },
-  aguardando_pagamento: {
-    label: "Aguardando Pgto",
-    className: "bg-amber-100 text-amber-700 border-none shadow-none",
-    icon: Clock3,
-  },
-  pendente: {
+  pending: {
     label: "Agendado",
     className: "bg-slate-100 text-slate-700 border-none shadow-none",
-    icon: AlertCircle,
+    icon: Clock3,
   },
-  cancelada: {
+  cancelled: {
     label: "Cancelada",
     className: "bg-red-100 text-red-700 border-none shadow-none",
-    icon: AlertCircle,
+    icon: XCircle,
   },
   completed: {
     label: "Concluída",
@@ -59,7 +60,8 @@ export function AppointmentHistory({ appointments }: AppointmentHistoryProps) {
       {sorted.map((apt) => {
         const date = new Date(apt.scheduled_at)
         const isPast = date < new Date()
-        const config = statusConfig[apt.status as keyof typeof statusConfig] || statusConfig.pendente
+        const config = statusConfig[apt.status as keyof typeof statusConfig] || statusConfig.pending
+        const StatusIcon = config.icon
         
         return (
           <Card key={apt.id} className="rounded-2xl border-transparent hover:border-slate-200 hover:bg-slate-50/80 transition-all shadow-sm">
@@ -91,7 +93,13 @@ export function AppointmentHistory({ appointments }: AppointmentHistoryProps) {
                     Pago
                   </Badge>
                 )}
+                {apt.payment_status === 'refunded' && (
+                  <Badge variant="outline" className="border-red-200 bg-red-50 text-red-700 shadow-none">
+                    Estornado
+                  </Badge>
+                )}
                 <Badge className={cn("px-3 py-1 font-bold text-[11px] uppercase tracking-wider", config.className)}>
+                  <StatusIcon className="size-3.5 mr-1" />
                   {config.label}
                 </Badge>
                 
@@ -101,10 +109,7 @@ export function AppointmentHistory({ appointments }: AppointmentHistoryProps) {
                     <FileText className="size-3" />
                   </Link>
                 ) : (
-                  <button className="flex items-center gap-1.5 text-xs font-bold text-slate-400 hover:text-slate-700 transition-colors">
-                    Detalhes
-                    <ArrowUpRight className="size-3" />
-                  </button>
+                  <span className="text-xs font-bold text-slate-400">Consulta futura</span>
                 )}
               </div>
             </CardContent>

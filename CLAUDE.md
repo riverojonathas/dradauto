@@ -15,7 +15,7 @@
 - Secretária e assistente IA via WhatsApp com memória de contexto
 
 **Público:** Médicos autônomos, clínicas pequenas e médias  
-**Stack principal:** Next.js 14+ · PostgreSQL (Supabase) · Clerk · Stripe · WhatsApp Cloud API · PydanticAI · n8n
+**Stack principal:** Next.js 14+ · PostgreSQL (Supabase) · Supabase Auth · Stripe · WhatsApp Cloud API · PydanticAI · n8n
 
 ---
 
@@ -26,6 +26,7 @@
 | Este arquivo | `CLAUDE.md` | Contexto vivo, conhecimento acumulado, estado atual |
 | Plano geral | `consultorio-medico-virtual.md` | Fases, planos de execução, checklist de progresso |
 | Fase 1 — Agenda | `fase-1-agenda-google-calendar.md` | Spec completa: OAuth, Calendar API, UI, regras de negócio |
+| Commits e pushes | `commits-e-pushes.md` | Histórico oficial de commits/pushes + status de publicação |
 | Orquestrador de skills | `/Users/prom1/Downloads/Habilidades do Gemini/CLAUDE.md` | Selecionar/adicionar skills ao projeto |
 | Catálogo de skills | `/Users/prom1/Downloads/Habilidades do Gemini/SKILLS-CATALOG.md` | 1290+ skills disponíveis |
 
@@ -46,8 +47,8 @@
 ## Status Atual
 
 **Fase:** `5 — Pagamentos via Stripe + Magic Link`  
-**Última atualização:** 2026-04-13  
-**Próxima ação:** Fase 5 — Pagamentos Stripe + link de pagamento via WhatsApp  
+**Última atualização:** 2026-04-14  
+**Próxima ação:** Fechar migração Auth (SQL/RLS) e retomar Fase 5 — Pagamentos Stripe + link de pagamento via WhatsApp  
 **Design System:** Saúde Humanizada (teal — `#0D9488`) — aplicado globalmente
 
 ### Progresso das Fases
@@ -55,7 +56,7 @@
 | Fase | Nome | Status |
 |------|------|--------|
 | 0 | Setup, Infraestrutura e Estrutura Base | ✅ Concluída |
-| 1 | Multi-tenant e Onboarding do Médico | ✅ Concluída (Planos 1–2: design system, Clerk auth, onboarding) |
+| 1 | Multi-tenant e Onboarding do Médico | ✅ Concluída (Planos 1–2: design system, auth + onboarding; migração para Supabase Auth iniciada em 2026-04-14) |
 | 2 | Agenda + Google Meet | ✅ Concluída (Planos 5a–5d: OAuth, Calendar API, UI desktop+mobile) |
 | 3 | Pacientes + Google Contacts | ✅ Concluída (Planos 6a–6d: People API, Combobox agenda, listagem, perfil) |
 | 4 | Prontuário, Anamnese e Magic Link | ✅ Concluída (Planos 7a–7d: prontuário 2 colunas, anamnese pública, magic link, médico preenche durante consulta) |
@@ -127,6 +128,9 @@ Ambiente dev:   /Users/prom1/Downloads/dradauto/
 | 2026-04-11 | Whitebook | Adiado pós-MVP | Integrar no MVP | API pública não confirmada; ANVISA é alternativa gratuita |
 | 2026-04-11 | Deploy Python | Vercel Python Functions | Railway separado | Mantém tudo no mesmo deploy, free tier cobre o MVP |
 | 2026-04-11 | Custo MVP | R$0 fixo | Serviços pagos | Vercel+Supabase+Clerk+Fly.io free tiers suficientes para MVP |
+| 2026-04-14 | Conflito no agendamento | Pré-checar conflito e exigir confirmação antes do insert | Salvar na primeira tentativa com alerta | Evita duplicidade de consultas |
+| 2026-04-14 | Padrão de telefone | Persistir WhatsApp em E.164 com DDI (55...) | Armazenar com máscara local | Deduplicação consistente e melhor integração com WhatsApp/Google |
+| 2026-04-14 | Auth (migração) | Supabase Auth | Clerk | Eliminar atrito de integração com RLS e reduzir complexidade operacional |
 
 ---
 
@@ -147,6 +151,9 @@ Ambiente dev:   /Users/prom1/Downloads/dradauto/
 - **2026-04-12 — `database.md` criado:** Documentação completa das 9 tabelas. Migration M001 (colunas Google em clinics) documentada como pendente de execução no Supabase.
 - **2026-04-13/14 — `middleware.ts` → `proxy.ts` (breaking change Next.js):** Esta versão do Next.js deprecou `middleware.ts` em favor de `proxy.ts`. O arquivo correto é `dradauto/proxy.ts`. O `middleware.ts` foi recriado por engano 2x — causou conflito fatal. **Protocolo obrigatório:** nunca recriar `middleware.ts`; usar apenas `proxy.ts`. Verificar `ls dradauto/proxy.ts` no início de cada sessão. O `proxy.ts` tem: `clerkMiddleware` + redirecionamento manual para `/sign-in` + proteção de onboarding.
 - **2026-04-13 — themeColor incorreto:** `app/layout.tsx` tinha `themeColor: "#2563EB"` (azul antigo). Corrigido para `#0D9488` (teal). Verificar sempre que o design system mudar.
+- **2026-04-14 — Fluxo de conflito no modal de nova consulta pode duplicar registros:** o fluxo atual inseria a consulta antes da confirmação explícita de conflito. Decisão aplicada no plano: pré-check sem insert e confirmação obrigatória antes de salvar.
+- **2026-04-14 — Normalização de WhatsApp para E.164 é necessária ponta a ponta:** variações de máscara/DDI impactam deduplicação de pacientes e integrações. Padrão adotado: persistir em E.164 com DDI.
+- **2026-04-14 — Migração Clerk → Supabase Auth destrava fluxo com RLS:** a troca remove acoplamentos com metadata/webhooks e simplifica autenticação para o padrão nativo do Supabase.
 
 ---
 
@@ -155,29 +162,28 @@ Ambiente dev:   /Users/prom1/Downloads/dradauto/
 > Esta seção é sobrescrita a cada sessão. Mantém apenas o estado mais recente.
 > **Sempre atualize ao encerrar uma sessão.**
 
-**Data da última sessão:** 2026-04-13  
+**Data da última sessão:** 2026-04-14  
 **O que foi feito:**
-- `middleware.ts` recriado novamente (2ª perda — bug recorrente crítico)
-- Bugs da agenda corrigidos: posição dos agendamentos (pxPerMin dinâmico via getBoundingClientRect), label da semana (âncora na segunda-feira com getMondayOf), navegação sem refetch
-- Melhorias na agenda: linha do "agora", auto-scroll, indicador de hoje, loading na navegação
-- Configurações de horário de trabalho: UI completa em `/configuracoes`, server action `updateClinicSettings`
-- `new-appointment-dialog.tsx`: pre-preenche duração e valor das configurações da clínica
-- `agenda/page.tsx`: cálculo de semana corrigido (getMondayOf, sem mutação, com setHours)
-- Clerk vs Supabase Auth: decidido manter Clerk — lentidão é apenas em dev (chaves de dev), prod é ~100-200ms
+- Migração de autenticação Clerk → Supabase Auth concluída (código + banco)
+- RLS completo: 23 policies em 9 tabelas (clinics, patients, appointments, medical_records, anamnesis, privacy_consents, whatsapp_sessions, conversation_memory, audit_logs)
+- `clinics.clerk_user_id` NOT NULL removida; `user_id uuid` como FK principal confirmada
+- Onboarding redesenhado (layout split, validação por etapa, persistência real)
+- Build validado sem erros (`npm run build`)
 
 **Estado da implementação:**
-- Agenda desktop + mobile ✅ | posição agendamentos ✅ | navegação semana ✅
-- Configurações de horário ✅ | linha do "agora" ✅ | auto-scroll ✅
-- proxy.ts ✅ (arquivo correto — NÃO recriar middleware.ts)
-- `lib/date-utils.ts` ✅ (isDatesSameDay, getSafeLocalTime, formatLongDate, getLocalISODate)
+- Migração de código para Supabase Auth ✅
+- Remoção de dependência Clerk ✅
+- RLS banco completo ✅
+- Build sem erros ✅
+- Pendente: QA end-to-end de Google OAuth/Contacts + deploy Vercel ⏳
 
-**O que está em andamento:** Fase 4 ✅ concluída. Pronto para Fase 5.
+**O que está em andamento:** Migração Clerk → Supabase Auth encerrada. Próximo: Fase 5 (Pagamentos Stripe).
 
 **Pendências para a próxima sessão:**
-- ✅ Migrations M002 + M003 executadas no Supabase
-- Iniciar **Fase 5** — Pagamentos via Stripe + Magic Link
-- n8n no Fly.io ainda pendente (necessário antes da Fase 6 — WhatsApp)
-- **ATENÇÃO:** Nunca recriar `middleware.ts` — o arquivo correto é `proxy.ts` (breaking change desta versão do Next.js)
+- [ ] Testar Google OAuth pós-migração (login social + integração Agenda)
+- [ ] Testar sync Google Contacts em paciente
+- [ ] Atualizar variáveis de ambiente em produção (Vercel)
+- [ ] Iniciar Fase 5 — Pagamentos via Stripe + Magic Link
 
 ---
 
@@ -202,6 +208,10 @@ Ambiente dev:   /Users/prom1/Downloads/dradauto/
 | 2026-04-13 | Claude+antigravity | Fase 4 concluída: prontuário 2 colunas, anamnese magic link, médico preenche durante consulta |
 | 2026-04-13 | Claude | Auditoria Fases 0–4: middleware.ts recriado (bug crítico), themeColor corrigido, database.md atualizado |
 | 2026-04-13 | Claude Code | Bugs agenda corrigidos (posição, semana, navegação), linha do agora, configurações horário, middleware.ts recriado (2ª vez) |
+| 2026-04-14 | Claude Code | Revisão do modal de nova consulta; bug crítico de conflito identificado; decisões fechadas (pré-check de conflito e padrão E.164); plano em commits atômicos definido |
+| 2026-04-14 | Claude Code | Documento `commits-e-pushes.md` criado para rastreio oficial de commits/pushes e regra de atualização contínua adicionada ao `CLAUDE.md` |
+| 2026-04-14 | Claude | Debug Google Contacts sync: adicionado logging detalhado no callback, melhorado token refresh com validações, criado diagnostico-google-oauth.sql para diagnosticar RLS e Clerk issues |
+| 2026-04-14 | Copilot | Migração de autenticação executada no código: Clerk removido, Supabase Auth aplicado em proxy/layout/actions/callback/login/logout, build validado; docs atualizadas |
 
 ---
 
@@ -227,5 +237,6 @@ Quando surgir uma necessidade não coberta pelas skills instaladas:
 - **Ao tomar uma decisão:** Registre imediatamente em "Decisões Arquiteturais" com data e motivo
 - **Ao encerrar a sessão:** Sobrescreva "Contexto da Última Sessão" e acrescente uma linha em "Log de Sessões"
 - **Ao descobrir algo novo:** Registre em "Descobertas e Aprendizados"
+- **Ao fazer commit ou push:** Atualize obrigatoriamente `commits-e-pushes.md` na mesma sessão (criação de commit, status de push, data/hora e observações)
 - **Nunca apague** decisões ou log de sessões — apenas acrescente
 - **Para novas skills:** Siga o processo em "Como Adicionar uma Nova Skill"

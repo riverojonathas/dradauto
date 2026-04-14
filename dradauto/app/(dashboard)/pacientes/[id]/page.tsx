@@ -35,7 +35,7 @@ export default async function PatientDetailPage(props: { params: Promise<{ id: s
     <div className="flex flex-col gap-8 max-w-5xl mx-auto w-full">
       <PatientDetailHeader 
         patient={patient} 
-        isProviderConnected={!!clinic.google_connected} 
+        isProviderConnected={!!clinic.google_access_token} 
       />
 
       {patient.notes && (
