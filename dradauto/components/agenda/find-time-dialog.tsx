@@ -62,7 +62,7 @@ export function FindTimeDialog({ onSelectSlot }: FindTimeDialogProps) {
             <ToggleGroup value={duration as any} onValueChange={(v: any) => v && setDuration(v)} className="justify-start">
               <ToggleGroupItem value="30">30 min</ToggleGroupItem>
               <ToggleGroupItem value="45">45 min</ToggleGroupItem>
-              <ToggleGroupItem value="60">60 max</ToggleGroupItem>
+              <ToggleGroupItem value="60">60 min</ToggleGroupItem>
             </ToggleGroup>
           </div>
 
@@ -89,7 +89,7 @@ export function FindTimeDialog({ onSelectSlot }: FindTimeDialogProps) {
             </div>
           )}
           
-          {!isLoading && slots.length === 0 && duration !== '30' && (
+          {!isLoading && slots.length === 0 && (
              <span className="text-xs text-muted-foreground text-center">Nenhum slot encontrado ou clique em buscar.</span>
           )}
         </div>

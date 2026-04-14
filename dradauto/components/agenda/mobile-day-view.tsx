@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { AppointmentCard } from './appointment-card'
-import { isDatesSameDay, getSafeLocalTime, formatLongDate } from '@/lib/date-utils'
+import { isDatesSameDay, getSafeLocalTime, formatLongDate, getLocalISODate } from '@/lib/date-utils'
 import type { AppointmentWithPatient } from '@/types'
 
 interface MobileDayViewProps {
@@ -23,9 +23,11 @@ export function MobileDayView({
     setIsClient(true)
   }, [])
   
-  const dailyApps = isClient 
-    ? appointments.filter(a => isDatesSameDay(a.scheduled_at, date))
-    : []
+  const dailyApps = useMemo(() => {
+    if (!isClient) return []
+    const key = getLocalISODate(date)
+    return appointments.filter(a => getLocalISODate(a.scheduled_at) === key)
+  }, [isClient, appointments, date])
   
   const HOURS = Array.from({ length: 14 }, (_, i) => i + 7) // 7 to 20
   const MINS = ['00', '30']

@@ -27,6 +27,6 @@ export async function updateClinicSettings(data: {
   if (error) throw new Error(error.message)
 
   revalidatePath('/agenda')
-  revalidatePath('/(dashboard)/configuracoes')
+  revalidatePath('/configuracoes')
   return { success: true }
 }

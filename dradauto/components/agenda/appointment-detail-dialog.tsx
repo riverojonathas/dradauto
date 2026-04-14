@@ -1,12 +1,12 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Copy, Stethoscope, RefreshCw, Video, Send, CheckCircle2, FileText, Loader2 } from 'lucide-react'
+import { Copy, Stethoscope, RefreshCw, Video, Send, CheckCircle2, FileText, Loader2, AlertCircle, X } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import type { AppointmentWithPatient } from '@/types'
 import { confirmAppointment, completeAppointment, cancelAppointment } from '@/app/actions/appointments'
@@ -34,10 +34,19 @@ const statusLabel: Record<string, string> = {
   completed: 'Concluída',
 }
 
+type Toast = { type: 'success' | 'error'; message: string }
+
 export function AppointmentDetailDialog({ isOpen, onClose, appointment, onSuccess }: AppointmentDetailDialogProps) {
   const [anamnesisToken, setAnamnesisToken] = useState<string | null>(null)
   const [tokenUsed, setTokenUsed] = useState(false)
   const [isSendingLink, setIsSendingLink] = useState(false)
+  const [isActing, setIsActing] = useState(false)
+  const [toast, setToast] = useState<Toast | null>(null)
+
+  const showToast = useCallback((type: Toast['type'], message: string) => {
+    setToast({ type, message })
+    setTimeout(() => setToast(null), 3500)
+  }, [])
 
   // Atualizar states quando appointment mudar
   useEffect(() => {
@@ -56,13 +65,18 @@ export function AppointmentDetailDialog({ isOpen, onClose, appointment, onSucces
   }
   const tipo = tipoConfig[appointment.tipo as keyof typeof tipoConfig] ?? tipoConfig.consulta
 
-  const handleAction = async (action: () => Promise<void>) => {
+  const handleAction = async (action: () => Promise<void>, successMsg: string) => {
+    setIsActing(true)
     try {
       await action()
+      showToast('success', successMsg)
       onSuccess()
-      onClose()
+      setTimeout(onClose, 800)
     } catch (e) {
       console.error(e)
+      showToast('error', 'Ocorreu um erro. Tente novamente.')
+    } finally {
+      setIsActing(false)
     }
   }
 
@@ -74,10 +88,12 @@ export function AppointmentDetailDialog({ isOpen, onClose, appointment, onSucces
         setAnamnesisToken(res.token)
         const baseUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin
         const url = `${baseUrl}/anamnese/${res.token}`
-        navigator.clipboard.writeText(url)
+        await navigator.clipboard.writeText(url)
+        showToast('success', 'Link copiado para a área de transferência')
       }
     } catch (e) {
       console.error(e)
+      showToast('error', 'Não foi possível gerar o link. Tente novamente.')
     } finally {
       setIsSendingLink(false)
     }
@@ -98,6 +114,16 @@ export function AppointmentDetailDialog({ isOpen, onClose, appointment, onSucces
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-[425px]">
+        {/* Toast inline */}
+        {toast && (
+          <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium mb-2 ${
+            toast.type === 'success' ? 'bg-primary/10 text-primary border border-primary/20' : 'bg-destructive/10 text-destructive border border-destructive/20'
+          }`}>
+            {toast.type === 'success' ? <CheckCircle2 className="size-4 shrink-0" /> : <AlertCircle className="size-4 shrink-0" />}
+            <span className="flex-1">{toast.message}</span>
+            <button type="button" onClick={() => setToast(null)}><X className="size-3" /></button>
+          </div>
+        )}
         <DialogHeader>
           <DialogTitle>{appointment.patient_name}</DialogTitle>
           <DialogDescription>
@@ -186,14 +212,22 @@ export function AppointmentDetailDialog({ isOpen, onClose, appointment, onSucces
           </Link>
           {appointment.status === 'pending' && (
             <div className="grid grid-cols-2 gap-2">
-              <Button onClick={() => handleAction(() => confirmAppointment(appointment.id))}>Confirmar</Button>
-              <Button variant="destructive" onClick={() => handleAction(() => cancelAppointment(appointment.id))}>Cancelar</Button>
+              <Button disabled={isActing} onClick={() => handleAction(() => confirmAppointment(appointment.id), 'Consulta confirmada!')}>
+                {isActing ? <Loader2 className="size-4 animate-spin" /> : 'Confirmar'}
+              </Button>
+              <Button variant="destructive" disabled={isActing} onClick={() => handleAction(() => cancelAppointment(appointment.id), 'Consulta cancelada.')}>
+                {isActing ? <Loader2 className="size-4 animate-spin" /> : 'Cancelar'}
+              </Button>
             </div>
           )}
           {appointment.status === 'confirmed' && (
             <div className="grid grid-cols-2 gap-2">
-              <Button onClick={() => handleAction(() => completeAppointment(appointment.id))}>Concluir</Button>
-              <Button variant="destructive" onClick={() => handleAction(() => cancelAppointment(appointment.id))}>Cancelar</Button>
+              <Button disabled={isActing} onClick={() => handleAction(() => completeAppointment(appointment.id), 'Consulta concluída!')}>
+                {isActing ? <Loader2 className="size-4 animate-spin" /> : 'Concluir'}
+              </Button>
+              <Button variant="destructive" disabled={isActing} onClick={() => handleAction(() => cancelAppointment(appointment.id), 'Consulta cancelada.')}>
+                {isActing ? <Loader2 className="size-4 animate-spin" /> : 'Cancelar'}
+              </Button>
             </div>
           )}
           {appointment.status === 'completed' && (

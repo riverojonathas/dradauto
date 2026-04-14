@@ -68,7 +68,7 @@ export async function updateCalendarEvent(
   const startDt = new Date(newStart)
   const endDt = new Date(startDt.getTime() + durationMinutes * 60_000)
 
-  await fetch(
+  const res = await fetch(
     `https://www.googleapis.com/calendar/v3/calendars/${clinic.google_calendar_id}/events/${eventId}`,
     {
       method: 'PATCH',
@@ -79,6 +79,10 @@ export async function updateCalendarEvent(
       }),
     }
   )
+
+  if (!res.ok) {
+    throw new Error(`Google Calendar API error: ${res.status}`)
+  }
 }
 
 export async function deleteCalendarEvent(clinic: Clinic, eventId: string): Promise<void> {

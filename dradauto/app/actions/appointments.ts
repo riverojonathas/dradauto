@@ -1,5 +1,4 @@
 'use server'
-import { auth } from '@clerk/nextjs/server'
 import { createServerClient } from '@/lib/supabase/server'
 import { getCurrentClinic } from '@/lib/clinic'
 import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from '@/lib/google/calendar'
@@ -96,13 +95,24 @@ export async function rescheduleAppointment(
 
   const supabase = createServerClient() as any
 
-  const { data: current } = await supabase.from('appointments').select('*').eq('id', id).single()
+  const { data: current } = await supabase
+    .from('appointments')
+    .select('*')
+    .eq('id', id)
+    .eq('clinic_id', clinic.id)
+    .single()
   if (!current) throw new Error('Consulta não encontrada')
 
-  await supabase.from('appointments').update({
-    scheduled_at: newScheduledAt,
-    duration_minutes: durationMinutes ?? current.duration_minutes,
-  }).eq('id', id)
+  const { error: updateError } = await supabase
+    .from('appointments')
+    .update({
+      scheduled_at: newScheduledAt,
+      duration_minutes: durationMinutes ?? current.duration_minutes,
+    })
+    .eq('id', id)
+    .eq('clinic_id', clinic.id)
+
+  if (updateError) throw new Error(updateError.message)
 
   if (clinic.google_connected && current.google_event_id) {
     try {
@@ -118,10 +128,21 @@ export async function cancelAppointment(id: string) {
 
   const supabase = createServerClient() as any
 
-  const { data: current } = await supabase.from('appointments').select('*').eq('id', id).single()
+  const { data: current } = await supabase
+    .from('appointments')
+    .select('*')
+    .eq('id', id)
+    .eq('clinic_id', clinic.id)
+    .single()
   if (!current) throw new Error('Consulta não encontrada')
 
-  await supabase.from('appointments').update({ status: 'cancelled' }).eq('id', id)
+  const { error: updateError } = await supabase
+    .from('appointments')
+    .update({ status: 'cancelled' })
+    .eq('id', id)
+    .eq('clinic_id', clinic.id)
+
+  if (updateError) throw new Error(updateError.message)
 
   if (clinic.google_connected && current.google_event_id) {
     try { await deleteCalendarEvent(clinic, current.google_event_id) } catch { /* silencioso */ }
@@ -130,15 +151,33 @@ export async function cancelAppointment(id: string) {
 
 // 4. Concluir consulta
 export async function completeAppointment(id: string) {
+  const clinic = await getCurrentClinic()
+  if (!clinic) throw new Error('Clínica não encontrada')
+
   const supabase = createServerClient() as any
-  await supabase.from('appointments').update({ status: 'completed' }).eq('id', id)
+  const { error } = await supabase
+    .from('appointments')
+    .update({ status: 'completed' })
+    .eq('id', id)
+    .eq('clinic_id', clinic.id)
+
+  if (error) throw new Error(error.message)
   // NÃO remove do Google Calendar — manter no histórico do médico
 }
 
 // 5. Confirmar consulta (pending → confirmed)
 export async function confirmAppointment(id: string) {
+  const clinic = await getCurrentClinic()
+  if (!clinic) throw new Error('Clínica não encontrada')
+
   const supabase = createServerClient() as any
-  await supabase.from('appointments').update({ status: 'confirmed' }).eq('id', id)
+  const { error } = await supabase
+    .from('appointments')
+    .update({ status: 'confirmed' })
+    .eq('id', id)
+    .eq('clinic_id', clinic.id)
+
+  if (error) throw new Error(error.message)
 }
 
 // 6. Buscar consultas por intervalo de datas

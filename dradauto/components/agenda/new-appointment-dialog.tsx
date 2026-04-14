@@ -22,6 +22,18 @@ import { useEffect } from 'react'
 
 import type { Patient } from '@/types'
 
+function normalizeWhatsapp(value: string): string {
+  return value.replace(/\D/g, '')
+}
+
+function formatWhatsapp(value: string): string {
+  const digits = normalizeWhatsapp(value).slice(0, 11)
+  if (digits.length <= 2) return digits
+  if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`
+  if (digits.length <= 10) return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`
+}
+
 // Componente de busca de paciente com criação inline
 function PatientSearch({ 
   onSelect, 
@@ -38,6 +50,11 @@ function PatientSearch({
 
   useEffect(() => {
     async function fetchPatients() {
+      if (!isOpen) {
+        setResults([])
+        return
+      }
+
       if (debouncedQuery.length < 2) { 
         setResults([])
         return 
@@ -53,9 +70,9 @@ function PatientSearch({
       }
     }
     
-    // Só buscar se o dropdown estiver ativo ou se o usuário acabou de digitar
+    // Busca apenas quando o dropdown está aberto e a query é válida
     fetchPatients()
-  }, [debouncedQuery])
+  }, [debouncedQuery, isOpen])
 
   return (
     <div className="relative">
@@ -152,6 +169,9 @@ export function NewAppointmentDialog({ isOpen, onClose, initialDate, initialTime
   const [observacoes, setObservacoes] = useState('')
   const [time, setTime] = useState(initialTime || '09:00')
 
+  const whatsappDigits = normalizeWhatsapp(whatsapp)
+  const isWhatsappValid = whatsappDigits.length === 10 || whatsappDigits.length === 11
+
   // Resetar formulário ao abrir o dialog (novo slot/data)
   useEffect(() => {
     if (isOpen) {
@@ -236,10 +256,13 @@ export function NewAppointmentDialog({ isOpen, onClose, initialDate, initialTime
               <InputGroupInput 
                 placeholder="(11) 99999-9999" 
                 value={whatsapp} 
-                onChange={(e) => setWhatsapp(e.target.value)}
+                onChange={(e) => setWhatsapp(formatWhatsapp(e.target.value))}
                 disabled={!!patientId} // Desabilita se for paciente existente
               />
             </InputGroup>
+            {!patientId && whatsapp && !isWhatsappValid && (
+              <p className="text-xs text-destructive">Digite um WhatsApp valido com DDD (10 ou 11 digitos).</p>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -326,7 +349,7 @@ export function NewAppointmentDialog({ isOpen, onClose, initialDate, initialTime
 
         <DialogFooter className="px-8 py-6 border-t border-border/50 bg-muted/30">
           <Button variant="ghost" onClick={onClose} className="text-muted-foreground">Cancelar</Button>
-          <Button onClick={handleSubmit} disabled={isLoading || !patientName || !whatsapp}>
+          <Button onClick={handleSubmit} disabled={isLoading || !patientName || !whatsapp || !isWhatsappValid}>
             {isLoading && <Loader2 className="mr-2 size-4 animate-spin" />}
             {conflict ? 'Confirmar mesmo assim' : (isLoading ? 'Criando...' : 'Criar Consulta')}
           </Button>

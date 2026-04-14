@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { AppointmentCard } from './appointment-card'
-import { isDatesSameDay, getSafeLocalTime } from '@/lib/date-utils'
+import { isDatesSameDay, getSafeLocalTime, getLocalISODate } from '@/lib/date-utils'
 import type { AppointmentWithPatient } from '@/types'
 
 interface CalendarViewProps {
@@ -83,6 +83,17 @@ export function CalendarView({
   const wStart = normalizeTime(workStart)
   const wEnd   = normalizeTime(workEnd)
 
+  // Pré-indexa consultas por data local (YYYY-MM-DD) para evitar filter() em cada slot
+  const appointmentsByDay = useMemo(() => {
+    const map = new Map<string, AppointmentWithPatient[]>()
+    for (const app of appointments) {
+      const key = getLocalISODate(app.scheduled_at)
+      if (!map.has(key)) map.set(key, [])
+      map.get(key)!.push(app)
+    }
+    return map
+  }, [appointments])
+
   return (
     <div ref={scrollRef} className="flex border rounded-lg bg-white shadow-sm overflow-x-auto overflow-y-auto h-full min-h-[600px] max-h-[calc(100vh-280px)]">
       {/* Coluna de horas */}
@@ -117,7 +128,7 @@ export function CalendarView({
         
         // No modo SSR, dailyApps deve ser vazio para evitar desvios até hidratar
         const dailyApps = isClient 
-          ? appointments.filter(a => isDatesSameDay(a.scheduled_at, d))
+          ? (appointmentsByDay.get(getLocalISODate(d)) ?? [])
           : []
           
         const weekday = d.toLocaleDateString('pt-BR', { weekday: 'short' }).toUpperCase().replace('.', '')
@@ -155,7 +166,7 @@ export function CalendarView({
                   <div
                     key={`s-${h}:${m}`}
                     ref={h === 7 && m === '00' && dayOffset === days[0] ? slotRef : undefined}
-                    onClick={() => onSlotClick(d, timeStr)}
+                    onClick={() => !isOutOfWork && onSlotClick(d, timeStr)}
                     className={`h-12 shrink-0 border-b transition-colors relative
                       ${isOutOfWork ? 'bg-muted/10 cursor-not-allowed' : 'cursor-pointer hover:bg-accent/40'}
                       ${isHalfHour ? 'border-b-border/40' : 'border-b-border'}
