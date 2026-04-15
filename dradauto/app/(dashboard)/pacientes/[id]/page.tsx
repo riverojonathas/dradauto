@@ -14,8 +14,12 @@ export const metadata = {
   title: 'Perfil do Paciente | dradauto',
 }
 
-export default async function PatientDetailPage(props: { params: Promise<{ id: string }> }) {
+export default async function PatientDetailPage(props: { params: Promise<{ id: string }>; searchParams?: Promise<{ q?: string }> }) {
   const params = await props.params;
+  const searchParams = await props.searchParams
+  const q = typeof searchParams?.q === 'string' ? searchParams.q.trim() : ''
+  const backHref = q ? `/pacientes?q=${encodeURIComponent(q)}` : '/pacientes'
+
   const clinic = await getCurrentClinic()
   if (!clinic) redirect('/sign-in')
 
@@ -23,7 +27,7 @@ export default async function PatientDetailPage(props: { params: Promise<{ id: s
   try {
     patient = await getPatient(params.id)
   } catch (e) {
-    redirect('/pacientes')
+    redirect(backHref)
   }
 
   const [prontuarios, anamneses] = await Promise.all([
@@ -36,6 +40,7 @@ export default async function PatientDetailPage(props: { params: Promise<{ id: s
       <PatientDetailHeader 
         patient={patient} 
         isProviderConnected={!!clinic.google_connected} 
+        backHref={backHref}
       />
 
       {patient.notes && (

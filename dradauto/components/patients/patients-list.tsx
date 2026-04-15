@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
+import { useState, useEffect, useRef } from 'react'
+import { usePathname, useRouter } from 'next/navigation'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { CloudUpload, Loader2, Plus, Search } from 'lucide-react'
@@ -10,19 +10,35 @@ import { useDebounce } from 'use-debounce'
 import { listPatients, syncAllPatientsToGoogle } from '@/app/actions/patients'
 import { PatientCard } from './patient-card'
 import { PatientFormDialog } from './patient-form-dialog'
+import { recordUxMetric } from '@/lib/ux-metrics'
 
 interface PatientsListProps {
   isProviderConnected: boolean
   initialFilter?: string
 }
 
-export function PatientsList({ isProviderConnected }: PatientsListProps) {
-  const [query, setQuery] = useState('')
+const PAGE_SIZE = 20
+
+export function PatientsList({ isProviderConnected, initialFilter }: PatientsListProps) {
+  const router = useRouter()
+  const pathname = usePathname()
+
+  const [query, setQuery] = useState(initialFilter || '')
   const [debouncedQuery] = useDebounce(query, 400)
   
   const [patients, setPatients] = useState<any[]>([])
   const [total, setTotal] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
+  const [isLoadingMore, setIsLoadingMore] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const [page, setPage] = useState(1)
+  const [hasMore, setHasMore] = useState(false)
+  const loadMoreRef = useRef<HTMLDivElement | null>(null)
+  const touchStartYRef = useRef<number | null>(null)
+  const [pullDistance, setPullDistance] = useState(0)
+  const [searchStartedAt, setSearchStartedAt] = useState<number | null>(
+    initialFilter?.trim() ? Date.now() : null
+  )
   
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncStatus, setSyncStatus] = useState<{ synced: number, show: boolean }>({ synced: 0, show: false })
@@ -34,22 +50,145 @@ export function PatientsList({ isProviderConnected }: PatientsListProps) {
   // idealmente viriam do backend pra exibir nos cards fora desta lista.
   // Aqui estamos renderizando a lista de fato.
 
-  const fetchPatients = async () => {
-    setIsLoading(true)
+  const fetchPatients = async (targetPage = 1, append = false) => {
+    if (append) {
+      setIsLoadingMore(true)
+    } else {
+      setIsLoading(true)
+    }
+
     try {
-      const res = await listPatients({ search: debouncedQuery, limit: 100 })
-      setPatients(res.patients)
+      const res = await listPatients({ search: debouncedQuery, page: targetPage, limit: PAGE_SIZE })
+      setPatients((prev) => {
+        if (!append) return res.patients
+        const merged = [...prev, ...res.patients]
+        const unique = new Map(merged.map((p) => [p.id, p]))
+        return Array.from(unique.values())
+      })
       setTotal(res.total)
+      setPage(targetPage)
+      setHasMore(targetPage * PAGE_SIZE < (res.total || 0))
     } catch (e) {
       console.error(e)
     } finally {
-      setIsLoading(false)
+      if (append) {
+        setIsLoadingMore(false)
+      } else {
+        setIsLoading(false)
+      }
     }
   }
 
   useEffect(() => {
-    fetchPatients()
+    fetchPatients(1, false)
   }, [debouncedQuery])
+
+  useEffect(() => {
+    if (debouncedQuery.trim()) {
+      setSearchStartedAt(Date.now())
+      recordUxMetric('patients_search_started', {
+        queryLength: debouncedQuery.trim().length,
+      })
+    } else {
+      setSearchStartedAt(null)
+    }
+  }, [debouncedQuery])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const value = debouncedQuery.trim()
+
+    if (value) {
+      params.set('q', value)
+    } else {
+      params.delete('q')
+    }
+
+    const next = params.toString() ? `${pathname}?${params.toString()}` : pathname
+    router.replace(next, { scroll: false })
+  }, [debouncedQuery, pathname, router])
+
+  const handleLoadMore = async () => {
+    if (!hasMore || isLoadingMore) return
+    await fetchPatients(page + 1, true)
+  }
+
+  const handlePullToRefresh = async () => {
+    if (isRefreshing || isLoading) return
+    setIsRefreshing(true)
+    try {
+      await fetchPatients(1, false)
+      setSyncStatus((prev) => ({ ...prev, show: false }))
+      setSyncError(null)
+      recordUxMetric('patients_pull_to_refresh', {
+        queryActive: !!debouncedQuery.trim(),
+      })
+    } finally {
+      setIsRefreshing(false)
+    }
+  }
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (window.scrollY > 0) {
+      touchStartYRef.current = null
+      return
+    }
+    touchStartYRef.current = e.touches[0]?.clientY ?? null
+  }
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (touchStartYRef.current === null || window.scrollY > 0 || isRefreshing) return
+
+    const currentY = e.touches[0]?.clientY ?? 0
+    const delta = currentY - touchStartYRef.current
+    if (delta <= 0) {
+      setPullDistance(0)
+      return
+    }
+
+    const clamped = Math.min(delta * 0.45, 96)
+    setPullDistance(clamped)
+  }
+
+  const handleTouchEnd = async () => {
+    const shouldRefresh = pullDistance >= 72
+    setPullDistance(0)
+    touchStartYRef.current = null
+
+    if (shouldRefresh) {
+      await handlePullToRefresh()
+    }
+  }
+
+  const handleOpenPatient = (patientId: string) => {
+    const queryValue = debouncedQuery.trim()
+    const elapsedMs = searchStartedAt ? Date.now() - searchStartedAt : null
+
+    recordUxMetric('patients_open_profile', {
+      patientId,
+      queryLength: queryValue.length,
+      usedSearch: !!queryValue,
+      elapsedMs,
+    })
+  }
+
+  useEffect(() => {
+    const target = loadMoreRef.current
+    if (!target || !hasMore) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const first = entries[0]
+        if (first?.isIntersecting && !isLoadingMore) {
+          handleLoadMore()
+        }
+      },
+      { rootMargin: '280px 0px' }
+    )
+
+    observer.observe(target)
+    return () => observer.disconnect()
+  }, [hasMore, isLoadingMore, page])
 
   const handleBulkSync = async () => {
     setIsSyncing(true)
@@ -83,8 +222,25 @@ export function PatientsList({ isProviderConnected }: PatientsListProps) {
   const unsyncedCount = patients.filter(p => !p.google_contact_id).length
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col sm:flex-row items-center gap-4 justify-between">
+    <div
+      className="flex flex-col gap-6"
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+    >
+      {(pullDistance > 0 || isRefreshing) && (
+        <div className="-mb-2 flex justify-center">
+          <div
+            className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-600 shadow-sm"
+            style={{ transform: `translateY(${Math.min(pullDistance, 36)}px)` }}
+          >
+            <Loader2 className={`size-3 ${isRefreshing ? 'animate-spin' : ''}`} />
+            {isRefreshing ? 'Atualizando pacientes...' : 'Puxe para atualizar'}
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 justify-between">
         <div className="relative w-full sm:max-w-md">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 size-4 text-slate-400" />
           <Input 
@@ -94,11 +250,18 @@ export function PatientsList({ isProviderConnected }: PatientsListProps) {
             onChange={(e) => setQuery(e.target.value)}
           />
         </div>
-        <Button className="rounded-full shadow-md" size="lg" onClick={() => setIsDialogOpen(true)}>
+        <Button className="rounded-full shadow-md w-full sm:w-auto" size="lg" onClick={() => setIsDialogOpen(true)}>
           <Plus className="mr-2 size-5" />
           Novo Paciente
         </Button>
       </div>
+
+      {!isLoading && (
+        <p className="text-xs sm:text-sm text-slate-500">
+          Mostrando {patients.length} de {total} paciente(s)
+          {debouncedQuery ? ` para "${debouncedQuery}"` : ''}
+        </p>
+      )}
 
       {isProviderConnected && unsyncedCount > 0 && !query && (
         <Alert className="border-primary/20 bg-primary/5 rounded-2xl shadow-sm relative overflow-hidden">
@@ -151,8 +314,29 @@ export function PatientsList({ isProviderConnected }: PatientsListProps) {
         ) : (
           <div className="flex flex-col gap-3">
             {patients.map(p => (
-              <PatientCard key={p.id} patient={p} isProviderConnected={isProviderConnected} />
+              <PatientCard
+                key={p.id}
+                patient={p}
+                isProviderConnected={isProviderConnected}
+                searchQuery={debouncedQuery}
+                onOpen={handleOpenPatient}
+              />
             ))}
+
+            {hasMore && (
+              <div ref={loadMoreRef} className="pt-2">
+                <div className="w-full rounded-xl border border-slate-200 bg-slate-50/70 py-2.5 text-center text-sm text-slate-500">
+                  {isLoadingMore ? (
+                    <div className="space-y-2 px-2">
+                      <div className="h-14 rounded-xl bg-slate-100 animate-pulse" />
+                      <div className="h-14 rounded-xl bg-slate-100 animate-pulse" />
+                    </div>
+                  ) : (
+                    'Role para carregar mais pacientes'
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

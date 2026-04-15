@@ -46,7 +46,7 @@
 ## Status Atual
 
 **Fase:** `5 — Pagamentos via Stripe + Magic Link`  
-**Última atualização:** 2026-04-13  
+**Última atualização:** 2026-04-14  
 **Próxima ação:** Fase 5 — Pagamentos Stripe + link de pagamento via WhatsApp  
 **Design System:** Saúde Humanizada (teal — `#0D9488`) — aplicado globalmente
 
@@ -127,6 +127,7 @@ Ambiente dev:   /Users/prom1/Downloads/dradauto/
 | 2026-04-11 | Whitebook | Adiado pós-MVP | Integrar no MVP | API pública não confirmada; ANVISA é alternativa gratuita |
 | 2026-04-11 | Deploy Python | Vercel Python Functions | Railway separado | Mantém tudo no mesmo deploy, free tier cobre o MVP |
 | 2026-04-11 | Custo MVP | R$0 fixo | Serviços pagos | Vercel+Supabase+Clerk+Fly.io free tiers suficientes para MVP |
+| 2026-04-14 | Auth (runtime atual) | Supabase Auth SSR | Clerk | Build quebrando por imports conflitantes e menor complexidade operacional em um único provedor de auth/session |
 
 ---
 
@@ -147,6 +148,9 @@ Ambiente dev:   /Users/prom1/Downloads/dradauto/
 - **2026-04-12 — `database.md` criado:** Documentação completa das 9 tabelas. Migration M001 (colunas Google em clinics) documentada como pendente de execução no Supabase.
 - **2026-04-13/14 — `middleware.ts` → `proxy.ts` (breaking change Next.js):** Esta versão do Next.js deprecou `middleware.ts` em favor de `proxy.ts`. O arquivo correto é `dradauto/proxy.ts`. O `middleware.ts` foi recriado por engano 2x — causou conflito fatal. **Protocolo obrigatório:** nunca recriar `middleware.ts`; usar apenas `proxy.ts`. Verificar `ls dradauto/proxy.ts` no início de cada sessão. O `proxy.ts` tem: `clerkMiddleware` + redirecionamento manual para `/sign-in` + proteção de onboarding.
 - **2026-04-13 — themeColor incorreto:** `app/layout.tsx` tinha `themeColor: "#2563EB"` (azul antigo). Corrigido para `#0D9488` (teal). Verificar sempre que o design system mudar.
+- **2026-04-14 — UX Pacientes orientada ao dia a dia clínico:** busca por nome + WhatsApp (com/sem máscara), paginação incremental com infinite scroll, contexto preservado via query string (`?q=`), volta determinística do detalhe para lista filtrada e retry individual de sync Google por paciente.
+- **2026-04-14 — Mobile/PWA em Pacientes:** pull-to-refresh na lista mobile/PWA, indicador visual de atualização e skeleton no carregamento incremental para reduzir sensação de travamento.
+- **2026-04-14 — Telemetria UX local (sem backend):** eventos de busca e abertura de perfil persistidos em `localStorage` (`dradauto_ux_metrics_v1`) para medir tempo de busca→abertura e orientar otimizações futuras.
 
 ---
 
@@ -155,27 +159,28 @@ Ambiente dev:   /Users/prom1/Downloads/dradauto/
 > Esta seção é sobrescrita a cada sessão. Mantém apenas o estado mais recente.
 > **Sempre atualize ao encerrar uma sessão.**
 
-**Data da última sessão:** 2026-04-13  
+**Data da última sessão:** 2026-04-14  
 **O que foi feito:**
-- `middleware.ts` recriado novamente (2ª perda — bug recorrente crítico)
-- Bugs da agenda corrigidos: posição dos agendamentos (pxPerMin dinâmico via getBoundingClientRect), label da semana (âncora na segunda-feira com getMondayOf), navegação sem refetch
-- Melhorias na agenda: linha do "agora", auto-scroll, indicador de hoje, loading na navegação
-- Configurações de horário de trabalho: UI completa em `/configuracoes`, server action `updateClinicSettings`
-- `new-appointment-dialog.tsx`: pre-preenche duração e valor das configurações da clínica
-- `agenda/page.tsx`: cálculo de semana corrigido (getMondayOf, sem mutação, com setHours)
-- Clerk vs Supabase Auth: decidido manter Clerk — lentidão é apenas em dev (chaves de dev), prod é ~100-200ms
+- Migração final de autenticação para Supabase SSR consolidada (sem imports Clerk em runtime) + callback de auth corrigido para persistência de sessão no redirect.
+- Pacientes: melhoria de UX operacional com cards compactos, status financeiro explícito no histórico e navegação mobile com estado ativo em subrotas.
+- Busca em Pacientes corrigida para **nome + WhatsApp** (incluindo telefone com/sem máscara).
+- Sincronização Google Contacts: retry individual por paciente (`syncPatientToGoogle`) + mensagens de erro acionáveis (`scope_missing`, `api_disabled`, `token_revoked`).
+- Configurações: card de Integração Google com conectar/reconectar/desconectar + botão de diagnóstico da People API.
+- Lista de Pacientes com paginação incremental + infinite scroll + preservação de filtro via `?q=` ao navegar para detalhe e voltar.
+- Mobile/PWA: pull-to-refresh na lista de pacientes e skeleton de carregamento incremental.
+- Telemetria UX local adicionada em `lib/ux-metrics.ts` para medir busca→abertura de perfil.
 
 **Estado da implementação:**
-- Agenda desktop + mobile ✅ | posição agendamentos ✅ | navegação semana ✅
-- Configurações de horário ✅ | linha do "agora" ✅ | auto-scroll ✅
+- Auth Supabase SSR ✅ | callback de sessão ✅ | build sem Clerk ✅
+- Pacientes UX v2 ✅ (busca telefone, infinite scroll, volta com filtro, retry individual de sync)
+- Configurações Google ✅ (reconexão + diagnóstico)
 - proxy.ts ✅ (arquivo correto — NÃO recriar middleware.ts)
-- `lib/date-utils.ts` ✅ (isDatesSameDay, getSafeLocalTime, formatLongDate, getLocalISODate)
 
-**O que está em andamento:** Fase 4 ✅ concluída. Pronto para Fase 5.
+**O que está em andamento:** Fase 5 ainda não iniciada; bloco de refinamento UX de Pacientes foi concluído.
 
 **Pendências para a próxima sessão:**
-- ✅ Migrations M002 + M003 executadas no Supabase
 - Iniciar **Fase 5** — Pagamentos via Stripe + Magic Link
+- Revisar `consultorio-medico-virtual.md` para refletir Auth Supabase SSR em vez de Clerk como estado atual de implementação
 - n8n no Fly.io ainda pendente (necessário antes da Fase 6 — WhatsApp)
 - **ATENÇÃO:** Nunca recriar `middleware.ts` — o arquivo correto é `proxy.ts` (breaking change desta versão do Next.js)
 
@@ -202,6 +207,7 @@ Ambiente dev:   /Users/prom1/Downloads/dradauto/
 | 2026-04-13 | Claude+antigravity | Fase 4 concluída: prontuário 2 colunas, anamnese magic link, médico preenche durante consulta |
 | 2026-04-13 | Claude | Auditoria Fases 0–4: middleware.ts recriado (bug crítico), themeColor corrigido, database.md atualizado |
 | 2026-04-13 | Claude Code | Bugs agenda corrigidos (posição, semana, navegação), linha do agora, configurações horário, middleware.ts recriado (2ª vez) |
+| 2026-04-14 | Claude Code | Migração Auth Supabase SSR consolidada + UX Pacientes v2 (busca telefone, infinite scroll, pull-to-refresh, retry sync individual, volta com filtro) |
 
 ---
 

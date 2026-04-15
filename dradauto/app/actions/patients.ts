@@ -29,7 +29,15 @@ export async function listPatients(params?: {
     .range(from, to)
 
   if (search) {
-    query = query.ilike('nome', `%${search}%`)
+    const searchTerm = search.trim()
+    const searchDigits = searchTerm.replace(/\D/g, '')
+
+    // Permite busca por nome e por WhatsApp (com ou sem máscara)
+    query = query.or(
+      searchDigits.length > 0
+        ? `nome.ilike.%${searchTerm}%,whatsapp.ilike.%${searchTerm}%,whatsapp.ilike.%${searchDigits}%`
+        : `nome.ilike.%${searchTerm}%,whatsapp.ilike.%${searchTerm}%`
+    )
   }
 
   const { data, error, count } = await query
@@ -208,6 +216,69 @@ export async function searchPatients(query: string) {
     .limit(8)
 
   return data || []
+}
+
+// Sincronizar um único paciente no Google Contacts (retry individual)
+export async function syncPatientToGoogle(patientId: string) {
+  const clinic = await getCurrentClinic()
+  if (!clinic?.google_connected) {
+    return { success: false, error: 'not_connected' as const }
+  }
+
+  const supabase = createServerClient() as any
+
+  const { data: patient, error } = await supabase
+    .from('patients')
+    .select('id, nome, whatsapp, google_contact_id')
+    .eq('id', patientId)
+    .eq('clinic_id', clinic.id)
+    .single()
+
+  if (error || !patient) {
+    return { success: false, error: 'patient_not_found' as const }
+  }
+
+  if (patient.google_contact_id) {
+    return { success: true, alreadySynced: true as const }
+  }
+
+  try {
+    const accessToken = await getValidAccessToken(clinic)
+    const resourceName = await createGoogleContact(accessToken, {
+      nome: patient.nome,
+      whatsapp: patient.whatsapp,
+      especialidadeMedico: clinic.especialidade,
+      nomeMedico: clinic.nome,
+    })
+
+    if (!resourceName) {
+      return { success: false, error: 'sync_failed' as const }
+    }
+
+    await supabase
+      .from('patients')
+      .update({ google_contact_id: resourceName })
+      .eq('id', patient.id)
+
+    revalidatePath('/pacientes')
+    revalidatePath(`/pacientes/${patient.id}`)
+    return { success: true }
+  } catch (e: any) {
+    if (e.message === 'GOOGLE_CONTACTS_SCOPE_MISSING') {
+      return { success: false, error: 'scope_missing' as const }
+    }
+    if (e.message === 'GOOGLE_PEOPLE_API_DISABLED') {
+      return { success: false, error: 'api_disabled' as const }
+    }
+    if (e.message === 'GOOGLE_TOKEN_REVOKED' || e.message === 'GOOGLE_TOKEN_MISSING') {
+      return { success: false, error: 'token_revoked' as const }
+    }
+    if (e.message === 'GOOGLE_NOT_CONNECTED') {
+      return { success: false, error: 'not_connected' as const }
+    }
+
+    return { success: false, error: 'sync_failed' as const }
+  }
 }
 
 // Sincronizar TODOS os pacientes sem google_contact_id (bulk sync)

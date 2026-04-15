@@ -26,6 +26,11 @@ const navItems = [
 export function MobileNav() {
   const pathname = usePathname()
 
+  const isItemActive = (href: string) => {
+    if (href === '/') return pathname === '/'
+    return pathname === href || pathname.startsWith(`${href}/`)
+  }
+
   return (
     <Sheet>
       <SheetTrigger
@@ -50,7 +55,7 @@ export function MobileNav() {
 
         <div className="flex flex-col gap-1 p-4">
           {navItems.map((item) => {
-            const isActive = pathname === item.href
+            const isActive = isItemActive(item.href)
             return (
               <Link
                 key={item.href}

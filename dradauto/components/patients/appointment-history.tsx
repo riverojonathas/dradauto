@@ -2,7 +2,7 @@
 
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { CheckCircle2, Clock3, AlertCircle, Video, FileText, ArrowUpRight } from 'lucide-react'
+import { CheckCircle2, Clock3, AlertCircle, Video, FileText } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { cn } from '@/lib/utils'
@@ -40,6 +40,21 @@ const statusConfig = {
   },
 }
 
+const paymentStatusConfig = {
+  paid: {
+    label: 'Pago',
+    className: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  },
+  pending: {
+    label: 'Pagamento pendente',
+    className: 'border-amber-200 bg-amber-50 text-amber-700',
+  },
+  refunded: {
+    label: 'Reembolsado',
+    className: 'border-slate-200 bg-slate-100 text-slate-700',
+  },
+}
+
 export function AppointmentHistory({ appointments }: AppointmentHistoryProps) {
   if (!appointments || appointments.length === 0) {
     return (
@@ -60,6 +75,7 @@ export function AppointmentHistory({ appointments }: AppointmentHistoryProps) {
         const date = new Date(apt.scheduled_at)
         const isPast = date < new Date()
         const config = statusConfig[apt.status as keyof typeof statusConfig] || statusConfig.pendente
+        const paymentConfig = paymentStatusConfig[apt.payment_status as keyof typeof paymentStatusConfig] || paymentStatusConfig.pending
         
         return (
           <Card key={apt.id} className="rounded-2xl border-transparent hover:border-slate-200 hover:bg-slate-50/80 transition-all shadow-sm">
@@ -85,12 +101,10 @@ export function AppointmentHistory({ appointments }: AppointmentHistoryProps) {
                 </div>
               </div>
 
-              <div className="flex items-center gap-4">
-                {apt.payment_status === 'paid' && (
-                  <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700 shadow-none">
-                    Pago
-                  </Badge>
-                )}
+              <div className="flex items-center gap-4 flex-wrap justify-end">
+                <Badge variant="outline" className={cn('shadow-none', paymentConfig.className)}>
+                  {paymentConfig.label}
+                </Badge>
                 <Badge className={cn("px-3 py-1 font-bold text-[11px] uppercase tracking-wider", config.className)}>
                   {config.label}
                 </Badge>
@@ -101,10 +115,9 @@ export function AppointmentHistory({ appointments }: AppointmentHistoryProps) {
                     <FileText className="size-3" />
                   </Link>
                 ) : (
-                  <button className="flex items-center gap-1.5 text-xs font-bold text-slate-400 hover:text-slate-700 transition-colors">
-                    Detalhes
-                    <ArrowUpRight className="size-3" />
-                  </button>
+                  <span className="text-xs font-semibold text-slate-500">
+                    Próxima consulta
+                  </span>
                 )}
               </div>
             </CardContent>

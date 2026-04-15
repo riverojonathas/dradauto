@@ -10,13 +10,15 @@ import { PatientFormDialog } from './patient-form-dialog'
 import { NewAppointmentDialog } from '@/components/agenda/new-appointment-dialog'
 import { useRouter } from 'next/navigation'
 import { toE164BR } from '@/lib/phone'
+import Link from 'next/link'
 
 interface PatientDetailHeaderProps {
   patient: any
   isProviderConnected: boolean
+  backHref?: string
 }
 
-export function PatientDetailHeader({ patient, isProviderConnected }: PatientDetailHeaderProps) {
+export function PatientDetailHeader({ patient, isProviderConnected, backHref = '/pacientes' }: PatientDetailHeaderProps) {
   const router = useRouter()
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [isAppointmentDialogOpen, setIsAppointmentDialogOpen] = useState(false)
@@ -72,13 +74,13 @@ export function PatientDetailHeader({ patient, isProviderConnected }: PatientDet
   return (
     <>
       <div className="flex flex-col gap-6">
-        <button 
-          onClick={() => router.back()} 
+        <Link
+          href={backHref}
           className="flex items-center gap-2 text-sm font-bold text-slate-400 hover:text-slate-700 transition-colors self-start"
         >
           <ArrowLeft className="size-4" />
           Voltar para Lista
-        </button>
+        </Link>
 
         <Card className="rounded-3xl border-slate-200/60 shadow-sm overflow-hidden bg-white">
           <CardContent className="p-8 flex flex-col md:flex-row gap-8 items-start md:items-center justify-between">
