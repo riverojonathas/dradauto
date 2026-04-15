@@ -2,6 +2,8 @@
 import { createServerClient } from '@/lib/supabase/server'
 import { getCurrentClinic } from '@/lib/clinic'
 import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from '@/lib/google/calendar'
+import { getValidAccessToken } from '@/lib/google/auth'
+import { createGoogleContact } from '@/lib/google/contacts'
 import type { AppointmentInsert } from '@/types'
 import { toE164BR } from '@/lib/phone'
 
@@ -80,13 +82,39 @@ export async function createAppointment(data: CreateAppointmentInput) {
           nome: patientName,
           whatsapp: normalizedWhatsapp,
         })
-        .select('id')
+        .select('id, google_contact_id')
         .single()
 
       if (patientError) {
         console.error('Erro ao criar paciente:', patientError)
         throw new Error('Falha ao criar ficha do paciente: ' + patientError.message)
       }
+
+      if (clinic.google_connected && clinic.google_refresh_token) {
+        try {
+          const accessToken = await getValidAccessToken(clinic)
+          const resourceName = await createGoogleContact(accessToken, {
+            nome: patientName,
+            whatsapp: normalizedWhatsapp,
+            especialidadeMedico: clinic.especialidade,
+            nomeMedico: clinic.nome,
+          })
+
+          if (resourceName) {
+            await supabase
+              .from('patients')
+              .update({ google_contact_id: resourceName })
+              .eq('id', newPatient.id)
+            newPatient.google_contact_id = resourceName
+          }
+        } catch (e: any) {
+          if (e?.message === 'GOOGLE_CONTACTS_SCOPE_MISSING') {
+            console.warn('Google Contacts scope não autorizado — paciente criado via agenda sem sync')
+          }
+          // Não bloqueia criação da consulta
+        }
+      }
+
       finalPatientId = newPatient.id
     }
   }

@@ -1,37 +1,53 @@
-import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
+import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
+import type { NextRequest } from 'next/server'
+import type { Database } from '@/types/supabase'
 
-const isPublicRoute = createRouteMatcher([
-  '/sign-in(.*)',
-  '/sign-up(.*)',
-  '/anamnese(.*)',
-  '/pagamento(.*)',
-])
+function isPublicRoute(pathname: string) {
+  return (
+    pathname.startsWith('/sign-in') ||
+    pathname.startsWith('/sign-up') ||
+    pathname.startsWith('/anamnese') ||
+    pathname.startsWith('/pagamento') ||
+    pathname.startsWith('/auth/')
+  )
+}
 
-const isOnboardingRoute = createRouteMatcher(['/onboarding(.*)'])
+export default async function proxy(request: NextRequest) {
+  if (isPublicRoute(request.nextUrl.pathname)) {
+    return NextResponse.next()
+  }
 
-export default clerkMiddleware(async (auth, request) => {
-  // Rotas públicas — sem autenticação
-  if (isPublicRoute(request)) return NextResponse.next()
+  const response = NextResponse.next()
+  const supabase = createServerClient<Database>(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll()
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            response.cookies.set(name, value, options)
+          })
+        },
+      },
+    }
+  )
 
-  // Chamar auth() uma única vez e pegar todos os dados
-  const session = await auth()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
 
-  // se não autenticado, redirecionar para sign-in
-  if (!session.userId) {
+  if (!user) {
     const signInUrl = new URL('/sign-in', request.url)
     signInUrl.searchParams.set('redirect_url', request.url)
     return NextResponse.redirect(signInUrl)
   }
 
-  // Usuário logado: verificar onboarding
-  const onboarded = (session.sessionClaims?.publicMetadata as any)?.onboarded
-  if (onboarded && isOnboardingRoute(request)) {
-    return NextResponse.redirect(new URL('/', request.url))
-  }
-
-  return NextResponse.next()
-})
+  return response
+}
 
 export const config = {
   matcher: [

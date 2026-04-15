@@ -1,22 +1,28 @@
-import { auth } from '@clerk/nextjs/server'
+import { getCurrentUser } from '@/lib/supabase/auth-server'
 import { createServerClient } from '@/lib/supabase/server'
 import type { Clinic } from '@/types'
 
 export async function getCurrentClinic(): Promise<Clinic | null> {
-  const { userId } = await auth()
-  if (!userId) return null
+  const user = await getCurrentUser()
+  if (!user) return null
 
-  const supabase = createServerClient()
-  const { data, error } = await supabase
-    .from('clinics' as any) // as any para evitar redundância de tipagem se o TS reclamar
+  const supabase = createServerClient() as any
+
+  const byUserId = await supabase
+    .from('clinics')
     .select('*')
-    .eq('clerk_user_id', userId)
-    .single()
+    .eq('user_id', user.id)
+    .maybeSingle()
 
-  if (error) {
-    console.error('Erro ao buscar clínica:', error)
-    return null
-  }
+  if (!byUserId.error && byUserId.data) return byUserId.data as Clinic
 
-  return data as Clinic
+  const byLegacyId = await supabase
+    .from('clinics')
+    .select('*')
+    .eq('clerk_user_id', user.id)
+    .maybeSingle()
+
+  if (!byLegacyId.error && byLegacyId.data) return byLegacyId.data as Clinic
+
+  return null
 }

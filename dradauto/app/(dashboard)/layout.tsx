@@ -1,20 +1,25 @@
-import { currentUser } from "@clerk/nextjs/server"
 import { Sidebar } from "@/components/layout/sidebar"
 import { Header } from "@/components/layout/header"
+import { getCurrentUser } from "@/lib/supabase/auth-server"
+import { getCurrentClinic } from "@/lib/clinic"
 
 export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-  const user = await currentUser()
-  const metadata = user?.publicMetadata as any
+  const [user, clinic] = await Promise.all([getCurrentUser(), getCurrentClinic()])
 
-  const userData = user ? {
-    fullName: user.fullName,
-    imageUrl: user.imageUrl,
-    especialidade: metadata?.especialidade as string | undefined
-  } : undefined
+  const metadata = (user?.user_metadata || {}) as Record<string, string>
+  const userData = {
+    fullName:
+      metadata.full_name ||
+      metadata.name ||
+      user?.email ||
+      'Médico',
+    imageUrl: metadata.avatar_url || '',
+    especialidade: clinic?.especialidade || undefined,
+  }
 
   return (
     <div className="min-h-screen bg-background font-sans">

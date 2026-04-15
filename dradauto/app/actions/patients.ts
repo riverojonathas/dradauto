@@ -247,7 +247,11 @@ export async function syncAllPatientsToGoogle() {
             .eq('id', patient.id)
           synced++
         }
-      } catch {
+      } catch (e: any) {
+        // Estes erros precisam de re-autenticação — abortar o loop e propagar
+        if (e.message === 'GOOGLE_CONTACTS_SCOPE_MISSING') throw e
+        if (e.message === 'GOOGLE_PEOPLE_API_DISABLED') throw e
+        if (e.message === 'GOOGLE_TOKEN_REVOKED') throw e
         failed++
       }
     }
@@ -255,8 +259,39 @@ export async function syncAllPatientsToGoogle() {
     if (e.message === 'GOOGLE_CONTACTS_SCOPE_MISSING') {
       return { success: false, error: 'scope_missing' }
     }
+    if (e.message === 'GOOGLE_PEOPLE_API_DISABLED') {
+      return { success: false, error: 'api_disabled' }
+    }
+    if (e.message === 'GOOGLE_TOKEN_REVOKED' || e.message === 'GOOGLE_TOKEN_MISSING') {
+      return { success: false, error: 'token_revoked' }
+    }
+    if (e.message === 'GOOGLE_NOT_CONNECTED') {
+      return { success: false, error: 'not_connected' }
+    }
+
+    return { success: false, error: 'sync_failed' }
   }
 
   revalidatePath('/pacientes')
   return { success: true, synced, failed, remaining: patients.length - synced }
+}
+
+// Diagnóstico: testa conexão com a People API e retorna o erro exato
+export async function diagnosePeopleApi() {
+  const clinic = await getCurrentClinic()
+  if (!clinic?.google_connected) return { ok: false, error: 'not_connected' }
+
+  try {
+    const accessToken = await getValidAccessToken(clinic)
+
+    const res = await fetch('https://people.googleapis.com/v1/people/me?personFields=names', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+
+    const text = await res.text()
+    if (res.ok) return { ok: true, status: res.status }
+    return { ok: false, status: res.status, body: text }
+  } catch (e: any) {
+    return { ok: false, error: e.message }
+  }
 }

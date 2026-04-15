@@ -57,12 +57,22 @@ export function PatientsList({ isProviderConnected }: PatientsListProps) {
     try {
       const res = await syncAllPatientsToGoogle()
       if (res.success) {
-        setSyncStatus({ synced: res.synced || 0, show: true })
-        fetchPatients()
+        if ((res.synced || 0) === 0 && (res.failed || 0) > 0) {
+          setSyncError(`Não foi possível sincronizar ${res.failed} paciente(s). Verifique a conexão com Google em Configurações.`)
+        } else {
+          setSyncStatus({ synced: res.synced || 0, show: true })
+          fetchPatients()
+        }
       } else {
-        setSyncError(res.error === 'scope_missing'
-          ? 'Escopo de Contatos não autorizado. Reconecte o Google em Configurações.'
-          : 'Erro ao sincronizar contatos.')
+        if (res.error === 'api_disabled') {
+          setSyncError('People API não está habilitada no Google Cloud Console. Acesse console.cloud.google.com → APIs & Services → Enable APIs → "People API" e habilite.')
+        } else if (res.error === 'scope_missing') {
+          setSyncError('Permissão de Contatos não autorizada. Clique em "Reconectar / atualizar permissões" em Configurações.')
+        } else if (res.error === 'token_revoked' || res.error === 'not_connected') {
+          setSyncError('Google desconectado ou token revogado. Reconecte em Configurações.')
+        } else {
+          setSyncError('Erro ao sincronizar contatos.')
+        }
       }
     } finally {
       setIsSyncing(false)

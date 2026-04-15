@@ -38,10 +38,21 @@ export async function createGoogleContact(
     body: JSON.stringify(body),
   })
 
-  if (res.status === 403) throw new Error('GOOGLE_CONTACTS_SCOPE_MISSING')
   if (!res.ok) {
-    console.error('Google Contacts create error:', await res.text())
-    return null // Falha silenciosa — paciente é salvo no banco mesmo sem contato
+    const errorText = await res.text()
+    console.error(`[Google Contacts] HTTP ${res.status}:`, errorText)
+
+    if (res.status === 401) throw new Error('GOOGLE_TOKEN_REVOKED')
+
+    if (res.status === 403) {
+      // Distinguir "scope missing" de "API not enabled"
+      if (errorText.includes('has not been used') || errorText.includes('is disabled') || errorText.includes('SERVICE_DISABLED')) {
+        throw new Error('GOOGLE_PEOPLE_API_DISABLED')
+      }
+      throw new Error('GOOGLE_CONTACTS_SCOPE_MISSING')
+    }
+
+    return null
   }
 
   const contact = await res.json()

@@ -1,7 +1,7 @@
 'use server'
 
-import { auth, clerkClient } from '@clerk/nextjs/server'
-import { redirect } from 'next/navigation'
+import { createServerClient } from '@/lib/supabase/server'
+import { getCurrentUser } from '@/lib/supabase/auth-server'
 
 export type OnboardingData = {
   // Step 1 — dados pessoais
@@ -17,36 +17,13 @@ export type OnboardingData = {
   duracaoConsulta: number // em minutos: 30, 45, 60
 }
 
-import { createServerClient } from '@/lib/supabase/server'
-
 export async function completeOnboarding(data: OnboardingData) {
-  const { userId } = await auth()
-  if (!userId) throw new Error('Não autenticado')
+  const user = await getCurrentUser()
+  if (!user) throw new Error('Não autenticado')
 
-  const client = await clerkClient()
+  const supabase = createServerClient() as any
 
-  await client.users.updateUser(userId, {
-    publicMetadata: {
-      onboarded: true,
-      role: 'doctor',
-      crm: `${data.crm}-${data.crmEstado}`,
-      especialidade: data.especialidade,
-      nomeClinica: data.nomeClinica,
-      whatsappClinica: data.whatsappClinica,
-      valorConsulta: data.valorConsulta,
-      duracaoConsulta: data.duracaoConsulta,
-    },
-    // Atualiza o nome real do médico no Clerk
-    firstName: data.nomeCompleto.split(' ')[0],
-    lastName: data.nomeCompleto.split(' ').slice(1).join(' '),
-  })
-
-  // Salvar no Supabase
-  const supabase = createServerClient()
-  
-  // Usamos tipagem explícita para evitar erros de inferência do TS com o Database gerado
-  const { error } = await supabase.from('clinics' as any).upsert({
-    clerk_user_id: userId,
+  const payload = {
     nome: data.nomeClinica,
     crm: data.crm,
     crm_estado: data.crmEstado,
@@ -55,11 +32,27 @@ export async function completeOnboarding(data: OnboardingData) {
     valor_consulta: data.valorConsulta,
     duracao_consulta: data.duracaoConsulta,
     nome_secretaria: 'Sofia',
-  } as any, { onConflict: 'clerk_user_id' })
+  }
 
-  if (error) {
-    console.error('Erro ao salvar no Supabase:', error)
-    // Não vamos bloquear o redirect por enquanto, mas logamos o erro
+  const upsertByUserId = await supabase
+    .from('clinics')
+    .upsert(
+      { user_id: user.id, ...payload },
+      { onConflict: 'user_id' }
+    )
+
+  if (!upsertByUserId.error) return { success: true }
+
+  const upsertByLegacyId = await supabase
+    .from('clinics')
+    .upsert(
+      { clerk_user_id: user.id, ...payload },
+      { onConflict: 'clerk_user_id' }
+    )
+
+  if (upsertByLegacyId.error) {
+    console.error('Erro ao salvar no Supabase:', upsertByLegacyId.error)
+    return { success: false, error: 'Não foi possível concluir o onboarding.' }
   }
 
   return { success: true }
